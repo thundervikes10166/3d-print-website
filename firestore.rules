@@ -1,0 +1,138 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if user is signed in
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    // Helper function to get current user data
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    
+    // Helper function to check if user is a teacher/admin
+    function isTeacherOrAdmin() {
+      return isSignedIn() && (
+        getUserData().role == 'teacher' || 
+        getUserData().role == 'admin' || 
+        getUserData().role == 'teacher_admin'
+      );
+    }
+    
+    // USERS COLLECTION
+    match /users/{userId} {
+      // Any authenticated user can read profiles (or public maker info)
+      allow read: if isSignedIn();
+      
+      // On creation, users CANNOT elevate themselves to teacher/admin
+      allow create: if isSignedIn() 
+        && request.auth.uid == userId 
+        && (!('role' in request.resource.data) || request.resource.data.role == 'student' || request.resource.data.role == 'student_maker');
+        
+      // Users can update their own profile fields, but CANNOT change their role
+      allow update: if isSignedIn() && (
+        isTeacherOrAdmin() || (
+          request.auth.uid == userId && 
+          request.resource.data.role == resource.data.role
+        )
+      );
+      
+      allow delete: if isTeacherOrAdmin();
+    }
+    
+    // LISTINGS COLLECTION
+    match /listings/{listingId} {
+      // Anyone can read published listings. Authenticated users can read their own listings. Teachers can read all.
+      allow read: if resource.data.status == 'published' 
+        || (isSignedIn() && (resource.data.creatorId == request.auth.uid || resource.data.makerId == request.auth.uid || isTeacherOrAdmin()));
+      
+      // Students can create listings for themselves (defaulting to draft or pendingApproval/pending_review)
+      allow create: if isSignedIn() 
+        && (request.resource.data.creatorId == request.auth.uid || request.resource.data.makerId == request.auth.uid);
+      
+      // Students can edit or delete their own listings. Teachers can moderate/update status of any listing.
+      allow update: if isSignedIn() && (
+        isTeacherOrAdmin() || 
+        (resource.data.creatorId == request.auth.uid || resource.data.makerId == request.auth.uid)
+      );
+      
+      allow delete: if isSignedIn() && (
+        isTeacherOrAdmin() || 
+        (resource.data.creatorId == request.auth.uid || resource.data.makerId == request.auth.uid)
+      );
+    }
+    
+    // REQUESTS COLLECTION (Custom CAD/3D Print Requests)
+    match /requests/{requestId} {
+      // Requesters can read their requests, assigned makers can read, and teachers can read all
+      allow read: if isSignedIn() && (
+        resource.data.requesterId == request.auth.uid || 
+        resource.data.assignedMakerId == request.auth.uid || 
+        isTeacherOrAdmin()
+      );
+      
+      // Authenticated users can submit custom requests
+      allow create: if isSignedIn() 
+        && (request.resource.data.requesterId == request.auth.uid);
+      
+      // Requesters can update notes, makers can update production statuses, teachers have full control
+      allow update: if isSignedIn() && (
+        isTeacherOrAdmin() || 
+        resource.data.requesterId == request.auth.uid || 
+        resource.data.assignedMakerId == request.auth.uid
+      );
+      
+      allow delete: if isTeacherOrAdmin();
+    }
+    
+    // ORDERS COLLECTION
+    match /orders/{orderId} {
+      // Buyers, sellers/makers, and teachers can read orders
+      allow read: if isSignedIn() && (
+        resource.data.buyerId == request.auth.uid || 
+        resource.data.sellerId == request.auth.uid || 
+        isTeacherOrAdmin()
+      );
+      
+      // Any authenticated user can place an order
+      allow create: if isSignedIn() && request.resource.data.buyerId == request.auth.uid;
+      
+      // Buyer, seller, or teacher can update order status/notes
+      allow update: if isSignedIn() && (
+        isTeacherOrAdmin() || 
+        resource.data.buyerId == request.auth.uid || 
+        resource.data.sellerId == request.auth.uid
+      );
+      
+      allow delete: if isTeacherOrAdmin();
+    }
+    
+    // CATEGORIES COLLECTION
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow write: if isTeacherOrAdmin();
+    }
+    
+    // CLASS STUDENTS (PUBLISHING WHITELIST) COLLECTION
+    match /class_students/{studentId} {
+      // Anyone signed in can read class student publishing authorization
+      allow read: if isSignedIn();
+      // Only teachers and admins can add, edit, or remove class students
+      allow write: if isTeacherOrAdmin();
+    }
+    
+    // INVENTORY / MATERIAL COLLECTIONS
+    match /inventory/{itemId} {
+      allow read: if true;
+      allow write: if isTeacherOrAdmin();
+    }
+    
+    // ADMIN WHITELIST COLLECTION
+    match /admin_whitelist/{adminId} {
+      allow read: if true;
+      allow write: if isTeacherOrAdmin();
+    }
+  }
+}

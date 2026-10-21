@@ -1,0 +1,6 @@
+{
+  "name": "Hueneme High 3D Print & Robotics Lab",
+  "description": "3D print marketplace and custom fabrication request portal for Hueneme High School (Oxnard, CA), Room Q10 Robotics & Coding Lab.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
