@@ -13,8 +13,8 @@ const db = getFirestore();
 const resendApiKey = defineSecret('RESEND_API_KEY');
 const notificationFromEmail = defineString('NOTIFICATION_FROM_EMAIL');
 const baselineAdminEmails = [
-  'ckojwang1@oxnardunion.org',
-  'kojwangpeter2@gmail.com',
+  'thundervikes10166@gmail.com',
+  'jonathan.soto@oxnardunion.org',
 ];
 
 type NotificationData = Record<string, unknown>;
