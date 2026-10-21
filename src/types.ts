@@ -39,8 +39,8 @@ export type UserRole = 'student' | 'teacher' | 'admin';
 export type PreferredUpdateMethod = 'email' | 'phone';
 
 export const BASELINE_ADMIN_WHITELIST: string[] = [
-  'ckojwang1@oxnardunion.org',
-  'kojwangpeter2@gmail.com',
+  'jonathan.soto@oxnardunion.org',
+  'thundervikes10166@gmail.com',
 ];
 
 export interface ClassStudent {
