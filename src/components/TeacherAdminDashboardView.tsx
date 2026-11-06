@@ -3,11 +3,8 @@ import { useLab } from '../context/LabContext';
 import { auth, db } from '../lib/firebase';
 import {
   signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  updateProfile,
-  signOut,
 } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import {
   ShieldAlert,
   ShieldCheck,
@@ -102,9 +99,8 @@ export const TeacherAdminDashboardView: React.FC = () => {
   const [statusNote, setStatusNote] = useState<string>('');
 
   // Whitelist rule enforcement: Check if email is in whitelist
-  const isWhitelisted = isAdminWhitelisted || (
-    currentUser?.email && isWhitelistedAdminEmail(currentUser.email)
-  );
+  // Admin Mode requires both a whitelisted email and a verified Firestore admin role.
+  const isWhitelisted = isAdminWhitelisted;
 
   // Admin authentication: Check password with Firebase and verify whitelist
   const handleAdminSignIn = async (e: React.FormEvent) => {
@@ -130,53 +126,16 @@ export const TeacherAdminDashboardView: React.FC = () => {
       return;
     }
 
-    // 2. Password check performed by Firebase
+    // 2. Authenticate without allowing the browser to grant itself admin access.
     try {
-      let userCredential;
-      try {
-        userCredential = await signInWithEmailAndPassword(auth, cleanEmail, cleanPassword);
-      } catch (authErr: any) {
-        if (authErr.code === 'auth/wrong-password') {
-          throw new Error('Incorrect password. Firebase could not verify your credentials.');
-        } else if (
-          authErr.code === 'auth/invalid-credential' ||
-          authErr.code === 'auth/user-not-found'
-        ) {
-          // If the authorized admin has not initialized a password in Firebase Auth yet, initialize it
-          try {
-            userCredential = await createUserWithEmailAndPassword(auth, cleanEmail, cleanPassword);
-            if (userCredential.user) {
-              await updateProfile(userCredential.user, { displayName: 'C. Kojwang (Lab Admin)' });
-            }
-          } catch (createErr: any) {
-            if (createErr.code === 'auth/email-already-in-use') {
-              throw new Error('Incorrect password. Firebase could not verify your credentials.');
-            }
-            throw new Error(createErr.message || 'Firebase authentication failed.');
-          }
-        } else {
-          throw authErr;
-        }
-      }
-
-      // 3. Confirm email is in Admin Mode and set role to trigger Admin Mode
-      if (userCredential?.user?.email && isWhitelistedAdminEmail(userCredential.user.email)) {
-        const userDocRef = doc(db, 'users', userCredential.user.uid);
-        await setDoc(
-          userDocRef,
-          {
-            uid: userCredential.user.uid,
-            email: userCredential.user.email,
-            displayName: userCredential.user.displayName || 'C. Kojwang (Lab Admin)',
-            role: 'admin',
-            gradeClass: 'Robotics Lab Instructor / Admin',
-          },
-          { merge: true }
+      const userCredential = await signInWithEmailAndPassword(auth, cleanEmail, cleanPassword);
+      const profileSnap = await getDoc(doc(db, 'users', userCredential.user.uid));
+      if (!profileSnap.exists() || profileSnap.data().role !== 'admin') {
+        setLoginError(
+          'Signed in, but this account has not yet been granted the admin role in Firestore. ' +
+          'In Firebase Console, open Firestore Database > users > your Authentication UID and set role to admin. ' +
+          'Then sign out and back in.'
         );
-        // Firebase onAuthStateChanged triggers in LabContext and instantly displays the Admin Dashboard!
-      } else {
-        await signOut(auth);
-        setLoginError(`Access Denied: "${cleanEmail}" is not authorized for Admin Mode.`);
       }
     } catch (err: any) {
       console.error('Admin Auth Error:', err);
@@ -1522,7 +1481,7 @@ export const TeacherAdminDashboardView: React.FC = () => {
                 </button>
               </div>
               <p className="text-[11px] text-slate-500 mt-2">
-                When authorized, this account will be able to verify their password and enter Admin Mode from the restricted portal.
+                Adding an email here only whitelists it in the app. To grant actual database admin permissions, an existing administrator must also set that account's users/UID role to admin using a trusted Firebase Console or backend action.
               </p>
             </form>
 

@@ -18,7 +18,6 @@ import {
   onSnapshot,
   query,
   where,
-  orderBy,
   addDoc,
   updateDoc,
   deleteDoc,
@@ -242,8 +241,12 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Explicit Backend Whitelist verification (Requirement 6)
+  // A whitelisted email alone does not grant Firestore permissions.
+  // The account must also have the admin role in its Firestore users/{uid} document.
   const isAdminWhitelisted = Boolean(
-    currentUser?.email && isWhitelistedAdminEmail(currentUser.email)
+    currentUser?.email &&
+    isWhitelistedAdminEmail(currentUser.email) &&
+    userProfile?.role === 'admin'
   );
 
   // Print Handler privileges (Requirement 5)
@@ -295,6 +298,7 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
+      setUserProfile(null);
       setIsAuthLoading(true);
 
       if (user) {
@@ -302,22 +306,18 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const userDocRef = doc(db, 'users', user.uid);
           const userDoc = await getDoc(userDocRef);
 
-          const isWhitelisted = isWhitelistedAdminEmail(user.email);
-
           if (userDoc.exists()) {
-            const data = userDoc.data() as UserProfile;
-            if (isWhitelisted && data.role !== 'admin') {
-              data.role = 'admin';
-            }
-            setUserProfile(data);
+            // Roles come from Firestore, not from an editable browser whitelist.
+            setUserProfile(userDoc.data() as UserProfile);
           } else {
-            // New user signed in (e.g. via Google), initialize profile
+            // Firestore rules only allow self-service creation as a student.
+            // Promote a trusted account to admin in Firebase Console afterwards.
             const newProfile: UserProfile = {
               uid: user.uid,
               email: user.email,
               displayName: user.displayName || user.email?.split('@')[0] || 'Maker',
-              role: isWhitelisted ? 'admin' : 'student',
-              gradeClass: isWhitelisted ? 'Robotics Lab Instructor / Admin' : 'Robotics Lab Student',
+              role: 'student',
+              gradeClass: 'Robotics Lab Student',
               createdAt: serverTimestamp(),
             };
             await setDoc(userDocRef, newProfile);
@@ -350,17 +350,33 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsLoadingData(true);
     setFirebaseConnectionError(null);
 
-    // Fetch / Listen to Listings
-    const listingsQuery = query(collection(db, 'listings'), orderBy('createdAt', 'desc'));
+    // Public visitors may only query published listings. Firestore security
+    // rules are NOT filters: querying all listings as a visitor is denied.
+    // Signed-in makers also receive their own drafts/pending listings.
+    // Authorized teachers/admins may fetch all listings for moderation.
+    const canModerateListings = userProfile?.role === 'teacher' || userProfile?.role === 'admin';
+    let publishedOrAllListings: Listing[] = [];
+    let ownListings: Listing[] = [];
+    const updateVisibleListings = () => {
+      const combined = canModerateListings
+        ? publishedOrAllListings
+        : [...publishedOrAllListings, ...ownListings];
+      const byId = new Map(combined.map((item) => [item.id, item]));
+      const sorted = Array.from(byId.values()).sort(
+        (a, b) => getTimestampMillis(b.createdAt) - getTimestampMillis(a.createdAt)
+      );
+      setListings(sorted);
+      setIsLoadingData(false);
+    };
+
+    const listingsQuery = canModerateListings
+      ? collection(db, 'listings')
+      : query(collection(db, 'listings'), where('status', '==', 'published'));
     const unsubListings = onSnapshot(
       listingsQuery,
       (snapshot) => {
-        const items: Listing[] = [];
-        snapshot.forEach((docSnap) => {
-          items.push({ id: docSnap.id, ...docSnap.data() } as Listing);
-        });
-        setListings(items);
-        setIsLoadingData(false);
+        publishedOrAllListings = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Listing));
+        updateVisibleListings();
       },
       (error) => {
         console.error('Firestore Listings snapshot error:', error);
@@ -368,6 +384,19 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsLoadingData(false);
       }
     );
+
+    let unsubOwnListings = () => {};
+    if (currentUser && !canModerateListings) {
+      const ownQuery = query(collection(db, 'listings'), where('creatorId', '==', currentUser.uid));
+      unsubOwnListings = onSnapshot(
+        ownQuery,
+        (snapshot) => {
+          ownListings = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Listing));
+          updateVisibleListings();
+        },
+        (error) => console.warn('Own listings query notice:', error)
+      );
+    }
 
     // Fetch / Listen to Categories
     const unsubCategories = onSnapshot(
@@ -443,12 +472,13 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     return () => {
       unsubListings();
+      unsubOwnListings();
       unsubCategories();
       unsubInventory();
       unsubClassStudents();
       unsubAdminWhitelist();
     };
-  }, []);
+  }, [currentUser?.uid, userProfile?.role]);
 
   // 3. User-Specific / Role-Specific Listeners (Requests and Orders)
   useEffect(() => {

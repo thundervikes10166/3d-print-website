@@ -141,8 +141,12 @@ export const CreateEditListingView: React.FC = () => {
         await updateListing(editingListingId, listingPayload as any);
         setSubmitSuccess('Listing updated successfully in Firestore!');
       } else {
-        const newId = await createListing(listingPayload as any);
-        setSubmitSuccess('Listing submitted to Firestore! Awaiting teacher safety clearance.');
+        await createListing(listingPayload as any);
+        setSubmitSuccess(
+          userProfile?.role === 'teacher' || userProfile?.role === 'admin'
+            ? 'Product published successfully and now visible in the store!'
+            : 'Listing submitted to Firestore! Awaiting teacher safety clearance.'
+        );
       }
 
       setTimeout(() => {
