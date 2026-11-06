@@ -1,31 +1,36 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useLab } from '../context/LabContext';
 import {
-  FileText,
+  ImagePlus,
+  X,
   Send,
   AlertCircle,
   CheckCircle2,
-  Image as ImageIcon,
   ArrowLeft,
-  Calendar,
-  Layers,
-  HelpCircle,
   Mail,
   Phone,
   User,
 } from 'lucide-react';
-import { MaterialType, Category, PreferredUpdateMethod } from '../types';
+import { MaterialType, PreferredUpdateMethod } from '../types';
+import { deleteUploadedRequestImage, uploadRequestImage, validateRequestImage } from '../lib/requestImageUpload';
 
-const CATEGORIES: Category[] = [
-  'Robotics',
-  'Desk Accessories',
-  'Tools',
-  'Games',
-  'Decorations',
-  'Other',
+type RequestedSize = 'Small' | 'Medium' | 'Large' | 'X-Large';
+type ColorMode = 'solid' | 'multicolor';
+
+const SIZE_OPTIONS: { value: RequestedSize; label: string }[] = [
+  { value: 'Small', label: 'Small (approximately 3 in × 3 in)' },
+  { value: 'Medium', label: 'Medium (approximately 6 in × 6 in)' },
+  { value: 'Large', label: 'Large (approximately 10 in × 10 in)' },
+  { value: 'X-Large', label: 'X-Large (12 in and up)' },
 ];
 
-const MATERIALS: MaterialType[] = ['PLA', 'PLA+', 'PETG', 'TPU', 'ABS'];
+const MATERIALS: { value: MaterialType; description: string }[] = [
+  { value: 'PLA', description: 'Standard prints, good for decorations' },
+  { value: 'PLA+', description: 'Stronger PLA for everyday use' },
+  { value: 'PETG', description: 'Durable and moisture-resistant' },
+  { value: 'TPU', description: 'Flexible, rubber-like material' },
+  { value: 'ABS', description: 'Tougher, more heat-resistant plastic' },
+];
 
 export const CustomRequestView: React.FC = () => {
   const {
@@ -36,28 +41,56 @@ export const CustomRequestView: React.FC = () => {
     setShowAuthModal,
   } = useLab();
 
-  // Contact fields (Requirement 5)
-  const [firstName, setFirstName] = useState(
-    userProfile?.displayName ? userProfile.displayName.split(' ')[0] : ''
-  );
-  const [lastName, setLastName] = useState(
-    userProfile?.displayName && userProfile.displayName.split(' ').length > 1
-      ? userProfile.displayName.split(' ').slice(1).join(' ')
-      : ''
-  );
-  const [contactEmail, setContactEmail] = useState(currentUser?.email || '');
+  // The form starts empty; contact details are confirmed before sending a quote request.
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
   const [contactPhone, setContactPhone] = useState('');
   const [preferredUpdateMethod, setPreferredUpdateMethod] = useState<PreferredUpdateMethod | ''>('');
 
   const [itemTitle, setItemTitle] = useState('');
-  const [category, setCategory] = useState<Category>('Robotics');
   const [description, setDescription] = useState('');
-  const [desiredDimensions, setDesiredDimensions] = useState('50 x 30 x 15 mm');
-  const [material, setMaterial] = useState<MaterialType>('PLA');
-  const [color, setColor] = useState('Cardinal Red');
-  const [quantity, setQuantity] = useState(1);
+  const [desiredSize, setDesiredSize] = useState<RequestedSize | ''>('');
+  const [material, setMaterial] = useState<MaterialType | ''>('');
+  const [colorMode, setColorMode] = useState<ColorMode | ''>('');
+  const [requestedColors, setRequestedColors] = useState('');
+  const [quantity, setQuantity] = useState('');
   const [neededByDate, setNeededByDate] = useState('');
-  const [referenceImageUrl, setReferenceImageUrl] = useState('');
+  const [referenceFileUrl, setReferenceFileUrl] = useState('');
+  const [referenceImage, setReferenceImage] = useState<File | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!referenceImage) {
+      setImagePreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(referenceImage);
+    setImagePreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [referenceImage]);
+
+  const clearImage = () => {
+    setReferenceImage(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleImageSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = event.target.files?.[0];
+    setSubmitError(null);
+    if (!selected) {
+      clearImage();
+      return;
+    }
+    const validationError = validateRequestImage(selected);
+    if (validationError) {
+      clearImage();
+      setSubmitError(validationError);
+      return;
+    }
+    setReferenceImage(selected);
+  };
   const [additionalNotes, setAdditionalNotes] = useState('');
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -112,14 +145,62 @@ export const CustomRequestView: React.FC = () => {
       return;
     }
 
+    if (!desiredSize) {
+      setSubmitError('Please select a print size.');
+      return;
+    }
+    if (!material) {
+      setSubmitError('Please select a material.');
+      return;
+    }
+    if (!Number.isInteger(Number(quantity)) || Number(quantity) < 1 || Number(quantity) > 1000) {
+      setSubmitError('Please enter a quantity between 1 and 1000.');
+      return;
+    }
+    if (!colorMode || !requestedColors.trim()) {
+      setSubmitError('Please select solid or multicolor and enter the requested color(s).');
+      return;
+    }
+    if (referenceImage) {
+      const imageError = validateRequestImage(referenceImage);
+      if (imageError) {
+        setSubmitError(imageError);
+        return;
+      }
+    }
+    if (referenceFileUrl.trim()) {
+      try {
+        const url = new URL(referenceFileUrl.trim());
+        if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('Unsupported link');
+      } catch {
+        setSubmitError('Please enter a valid http(s) link to your STL file or photo.');
+        return;
+      }
+    }
+
     setShowContactConfirmation(true);
   };
 
   const handleConfirmedSubmit = async () => {
+    if (!currentUser || !preferredUpdateMethod || !material || !desiredSize || !colorMode || !requestedColors.trim()) {
+      setShowContactConfirmation(false);
+      setSubmitError('Please complete the required fields before requesting a quote.');
+      return;
+    }
     setShowContactConfirmation(false);
     setIsSubmitting(true);
 
+    let uploadedImagePath: string | null = null;
     try {
+      // Upload the image first, then save its URL on the same Firestore request.
+      // If the Firestore write fails, try to clean up the unused upload.
+      let uploadedImageUrl: string | null = null;
+      if (referenceImage) {
+        const upload = await uploadRequestImage(referenceImage, currentUser.uid);
+        uploadedImageUrl = upload.imageUrl;
+        uploadedImagePath = upload.imagePath;
+      }
+
       const requestData = {
         requesterId: currentUser.uid,
         requesterDisplayName: `${firstName.trim()} ${lastName.trim()}`,
@@ -131,17 +212,21 @@ export const CustomRequestView: React.FC = () => {
         updatesActivated: true,
         requesterRole: (userProfile?.role === 'teacher' ? 'Teacher' : 'Student') as any,
         itemTitle: itemTitle.trim(),
-        category,
         description: description.trim(),
-        desiredDimensions: desiredDimensions.trim(),
-        desiredSize: desiredDimensions.trim(),
+        desiredSize,
+        // Retain the dimensions field for compatibility with older request displays.
+        desiredDimensions: SIZE_OPTIONS.find((option) => option.value === desiredSize)?.label || desiredSize,
         material,
         preferredMaterial: material,
-        color: color.trim(),
-        preferredColor: color,
+        colorMode,
+        color: requestedColors.trim(),
+        preferredColor: requestedColors.trim(),
+        isQuoteRequest: true,
         quantity: Number(quantity),
         neededByDate: neededByDate || 'Next lab cycle',
-        ...(referenceImageUrl.trim() ? { referenceImageUrl: referenceImageUrl.trim() } : {}),
+        ...(referenceFileUrl.trim() ? { referenceFileUrl: referenceFileUrl.trim() } : {}),
+        ...(uploadedImageUrl ? { referenceImageUrl: uploadedImageUrl } : {}),
+        ...(uploadedImagePath ? { referenceImageStoragePath: uploadedImagePath } : {}),
         ...(additionalNotes.trim() ? { additionalNotes: additionalNotes.trim() } : {}),
         pickupLocation: 'Hueneme High School • Room Q10 Print Pickup Shelf',
       };
@@ -150,13 +235,20 @@ export const CustomRequestView: React.FC = () => {
 
       setSubmitSuccessTicket(docId);
     } catch (err: any) {
+      if (uploadedImagePath) {
+        await deleteUploadedRequestImage(uploadedImagePath).catch(() => {});
+      }
       const errorCode = String(err?.code || '');
       const errorMessage = String(err?.message || '');
-      const friendlyMessage = errorCode.includes('permission-denied')
-        ? 'Your request could not be submitted because your account does not have permission. Please sign in again and try once more.'
-        : errorMessage.includes('Unsupported field value')
-          ? 'Some optional request details were empty. Please review the form and try again.'
-          : 'We could not submit your request right now. Please check your connection and try again.';
+      const friendlyMessage = errorCode.startsWith('storage/')
+        ? 'The image could not be uploaded. Please check Firebase Storage is enabled, the Storage rules are published, and your account is signed in.'
+        : errorMessage.includes('Image uploads are not configured')
+          ? errorMessage
+          : errorCode.includes('permission-denied')
+            ? 'Your request could not be submitted because your account does not have permission. Please sign in again and try once more.'
+            : errorMessage.includes('Unsupported field value')
+              ? 'Some optional request details were empty. Please review the form and try again.'
+              : 'We could not submit your request right now. Please check your connection and try again.';
       setSubmitError(friendlyMessage);
     } finally {
       setIsSubmitting(false);
@@ -186,7 +278,7 @@ export const CustomRequestView: React.FC = () => {
           Submit Custom 3D Print Request
         </h1>
         <p className="text-xs sm:text-sm text-slate-600 mt-1 font-normal leading-relaxed">
-          Need a custom motor bracket, sensor mount, or enclosure? Submit your specifications to the student lab queue.
+          Tell us what you would like printed. Our student team will review your request and provide a quote.
         </p>
       </div>
 
@@ -194,7 +286,7 @@ export const CustomRequestView: React.FC = () => {
       <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 flex items-start gap-2 shadow-xs">
         <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
         <div className="leading-snug">
-          <strong>Notice:</strong> Students or teachers must align on pricing details prior to entering production, as costs vary.
+          <strong>Quote request only:</strong> After you submit, we will reach out with a price estimate before printing begins. Submitting does not start a print job.
         </div>
       </div>
 
@@ -217,7 +309,7 @@ export const CustomRequestView: React.FC = () => {
               Request Submitted to Queue
             </h2>
             <p className="text-xs text-slate-600 max-w-md mx-auto">
-              Your custom CAD request has been recorded in Cloud Firestore. A student maker will review the dimensions and provide a custom quote.
+              Your request has been submitted. Our team will reach out with an estimate before printing begins.
             </p>
             <div className="pt-2 text-xs font-mono text-[#C41E3A] font-bold">
               Preferred Updates: {preferredUpdateMethod === 'email' ? 'Email' : 'Phone'} ({preferredUpdateMethod === 'email' ? contactEmail : contactPhone})
@@ -239,8 +331,22 @@ export const CustomRequestView: React.FC = () => {
             <button
               onClick={() => {
                 setSubmitSuccessTicket(null);
+                setFirstName('');
+                setLastName('');
+                setContactEmail('');
+                setContactPhone('');
+                setPreferredUpdateMethod('');
                 setItemTitle('');
                 setDescription('');
+                setReferenceFileUrl('');
+                clearImage();
+                setMaterial('');
+                setDesiredSize('');
+                setColorMode('');
+                setRequestedColors('');
+                setQuantity('');
+                setNeededByDate('');
+                setAdditionalNotes('');
               }}
               className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-xs font-bold uppercase tracking-wider transition-colors"
             >
@@ -266,7 +372,6 @@ export const CustomRequestView: React.FC = () => {
                   type="text"
                   value={firstName}
                   onChange={(e) => setFirstName(e.target.value)}
-                  placeholder="First"
                   className="w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded focus:bg-white focus:border-[#C41E3A] outline-hidden"
                 />
               </div>
@@ -279,7 +384,6 @@ export const CustomRequestView: React.FC = () => {
                   type="text"
                   value={lastName}
                   onChange={(e) => setLastName(e.target.value)}
-                  placeholder="Last"
                   className="w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded focus:bg-white focus:border-[#C41E3A] outline-hidden"
                 />
               </div>
@@ -294,7 +398,6 @@ export const CustomRequestView: React.FC = () => {
                   type="email"
                   value={contactEmail}
                   onChange={(e) => setContactEmail(e.target.value)}
-                  placeholder="name@oxnardunion.org"
                   className="w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded focus:bg-white focus:border-[#C41E3A] outline-hidden"
                 />
               </div>
@@ -307,7 +410,6 @@ export const CustomRequestView: React.FC = () => {
                   type="tel"
                   value={contactPhone}
                   onChange={(e) => setContactPhone(e.target.value)}
-                  placeholder="(805) 555-0199"
                   className="w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded focus:bg-white focus:border-[#C41E3A] outline-hidden"
                 />
               </div>
@@ -358,36 +460,16 @@ export const CustomRequestView: React.FC = () => {
               Model Specifications
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="sm:col-span-2">
-                <label className="block text-[11px] font-bold uppercase text-slate-700 mb-1">
-                  Item Title *
-                </label>
-                <input
-                  type="text"
-                  value={itemTitle}
-                  onChange={(e) => setItemTitle(e.target.value)}
-                  placeholder="e.g. Dual Motor Servo Bracket"
-                  className="w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded focus:bg-white focus:border-[#C41E3A] outline-hidden"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold uppercase text-slate-700 mb-1">
-                  Category
-                </label>
-                <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value as Category)}
-                  className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded focus:bg-white focus:border-[#C41E3A] outline-hidden"
-                >
-                  {CATEGORIES.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <div>
+              <label className="block text-[11px] font-bold uppercase text-slate-700 mb-1">
+                Item Title *
+              </label>
+              <input
+                type="text"
+                value={itemTitle}
+                onChange={(e) => setItemTitle(e.target.value)}
+                className="w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded focus:bg-white focus:border-[#C41E3A] outline-hidden"
+              />
             </div>
 
             <div>
@@ -398,53 +480,144 @@ export const CustomRequestView: React.FC = () => {
                 rows={3}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Describe the mounting holes, functional stress load, or mechanical requirements..."
                 className="w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded focus:bg-white focus:border-[#C41E3A] outline-hidden"
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-[11px] font-bold uppercase text-slate-700 mb-1">
+                Link to STL File or Reference Photo (Optional)
+              </label>
+              <input
+                type="url"
+                value={referenceFileUrl}
+                onChange={(e) => setReferenceFileUrl(e.target.value)}
+                className="w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded focus:bg-white focus:border-[#C41E3A] outline-hidden"
+              />
+              <p className="mt-1 text-[10px] text-slate-500">
+                Paste a shareable link to an STL file or photo (Google Drive, Dropbox, etc.). Please make sure we can open it.
+              </p>
+            </div>
+
+            <div className="rounded border border-slate-200 bg-slate-50 p-4 space-y-2">
+              <label htmlFor="request-image" className="flex items-center gap-2 text-[11px] font-bold uppercase text-slate-700">
+                <ImagePlus className="h-4 w-4 text-[#C41E3A]" /> Upload a Reference Image (Optional)
+              </label>
+              <input
+                id="request-image"
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={handleImageSelect}
+                className="block w-full text-xs text-slate-600 file:mr-3 file:rounded file:border-0 file:bg-[#C41E3A] file:px-3 file:py-2 file:font-semibold file:text-white hover:file:bg-[#A0182E]"
+              />
+              <p className="text-[10px] text-slate-500">JPG, PNG, or WebP only, up to 5 MB. You can also provide a separate STL or photo link above.</p>
+              {referenceImage && (
+                <div className="flex items-start gap-3 rounded border border-slate-200 bg-white p-2">
+                  {imagePreviewUrl && (
+                    <img src={imagePreviewUrl} alt="Selected reference image preview" className="h-24 w-24 rounded object-contain" />
+                  )}
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <p className="break-all text-xs font-medium text-slate-700">{referenceImage.name}</p>
+                    <button type="button" onClick={clearImage} className="inline-flex items-center gap-1 text-xs font-semibold text-[#C41E3A] hover:underline">
+                      <X className="h-3.5 w-3.5" /> Remove image
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-[11px] font-bold uppercase text-slate-700 mb-1">
-                  Material
+                  Material *
                 </label>
                 <select
+                  required
                   value={material}
-                  onChange={(e) => setMaterial(e.target.value as MaterialType)}
+                  onChange={(e) => setMaterial(e.target.value as MaterialType | '')}
                   className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded focus:bg-white focus:border-[#C41E3A] outline-hidden"
                 >
-                  {MATERIALS.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
+                  <option value="" disabled></option>
+                  {MATERIALS.map(({ value, description }) => (
+                    <option key={value} value={value}>{value} - {description}</option>
                   ))}
                 </select>
+                <p className="mt-1 text-[10px] text-slate-500">{MATERIALS.find((item) => item.value === material)?.description || 'Choose the filament that best fits your project.'}</p>
               </div>
-
               <div>
                 <label className="block text-[11px] font-bold uppercase text-slate-700 mb-1">
-                  Color
+                  Requested Size *
+                </label>
+                <select
+                  required
+                  value={desiredSize}
+                  onChange={(e) => setDesiredSize(e.target.value as RequestedSize | '')}
+                  className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded focus:bg-white focus:border-[#C41E3A] outline-hidden"
+                >
+                  <option value="" disabled></option>
+                  {SIZE_OPTIONS.map((size) => (
+                    <option key={size.value} value={size.value}>{size.label}</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-[10px] text-slate-500">Approximate sizes; we will confirm the final dimensions in your quote.</p>
+              </div>
+            </div>
+
+            <div>
+              <label htmlFor="request-quantity" className="block text-[11px] font-bold uppercase text-slate-700 mb-1">
+                Quantity *
+              </label>
+              <input
+                id="request-quantity"
+                type="number"
+                min={1}
+                max={1000}
+                step={1}
+                required
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+                className="w-full sm:w-40 px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded focus:bg-white focus:border-[#C41E3A] outline-hidden"
+              />
+            </div>
+
+            <fieldset className="space-y-3">
+              <legend className="block text-[11px] font-bold uppercase text-slate-700">
+                Print Colors *
+              </legend>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {([
+                  { value: 'solid' as const, label: 'Solid Color', detail: 'One color for the entire print' },
+                  { value: 'multicolor' as const, label: 'Multicolor', detail: 'Two or more colors in one print' },
+                ]).map(({ value, label, detail }) => (
+                  <label key={value} className={`flex cursor-pointer items-start gap-3 rounded border p-3 ${colorMode === value ? 'border-[#C41E3A] bg-red-50' : 'border-slate-200 bg-slate-50 hover:border-slate-300'}`}>
+                    <input
+                      type="radio"
+                      name="colorMode"
+                      value={value}
+                      checked={colorMode === value}
+                      onChange={() => setColorMode(value)}
+                      className="h-4 w-4 mt-0.5 accent-[#C41E3A]"
+                    />
+                    <span>
+                      <span className="block text-xs font-bold text-slate-900">{label}</span>
+                      <span className="block text-[10px] text-slate-500">{detail}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold uppercase text-slate-700 mb-1">
+                  {colorMode === 'multicolor' ? 'What Colors Would You Like? *' : 'What Color Would You Like? *'}
                 </label>
                 <input
                   type="text"
-                  value={color}
-                  onChange={(e) => setColor(e.target.value)}
+                  value={requestedColors}
+                  onChange={(e) => setRequestedColors(e.target.value)}
                   className="w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded focus:bg-white focus:border-[#C41E3A] outline-hidden"
                 />
               </div>
-
-              <div>
-                <label className="block text-[11px] font-bold uppercase text-slate-700 mb-1">
-                  Dimensions
-                </label>
-                <input
-                  type="text"
-                  value={desiredDimensions}
-                  onChange={(e) => setDesiredDimensions(e.target.value)}
-                  className="w-full px-3 py-1.5 text-xs font-mono bg-slate-50 border border-slate-200 rounded focus:bg-white focus:border-[#C41E3A] outline-hidden"
-                />
-              </div>
-            </div>
+            </fieldset>
           </div>
 
           {/* Submit Action */}
@@ -459,7 +632,7 @@ export const CustomRequestView: React.FC = () => {
               ) : (
                 <>
                   <Send className="w-3.5 h-3.5" />
-                  <span>Submit Request</span>
+                  <span>Request an Estimate</span>
                 </>
               )}
             </button>
@@ -479,7 +652,7 @@ export const CustomRequestView: React.FC = () => {
                   Confirm Contact Information
                 </h2>
                 <p className="mt-1 text-xs leading-relaxed text-slate-600">
-                  Please confirm this is the information the lab should use for updates.
+                  Please confirm your contact information. We will reach out with an estimated price before printing.
                 </p>
               </div>
             </div>
@@ -496,6 +669,10 @@ export const CustomRequestView: React.FC = () => {
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Phone</div>
                 <div className="text-slate-900">{contactPhone.trim() || 'Not provided'}</div>
+              </div>
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Quantity</div>
+                <div className="font-semibold text-slate-900">{quantity}</div>
               </div>
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Preferred Updates</div>
@@ -516,7 +693,7 @@ export const CustomRequestView: React.FC = () => {
                 onClick={handleConfirmedSubmit}
                 className="rounded bg-[#C41E3A] px-4 py-2 text-xs font-bold uppercase tracking-wider text-white hover:bg-[#A0182E]"
               >
-                Confirm & Submit
+                Confirm & Request Quote
               </button>
             </div>
           </div>

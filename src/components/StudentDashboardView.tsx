@@ -14,7 +14,11 @@ import {
   FileText,
   Printer,
 } from 'lucide-react';
-import { ListingStatus, RequestStatus, OrderStatus } from '../types';
+import { ListingStatus, OrderStatus, RequestStatus } from '../types';
+import { RequestNotesPanel } from './RequestNotesPanel';
+import { nextRequestStatus, requestStatusLabel, displayRequestedDimensions } from '../lib/requestWorkflow';
+import { RequestPipeline } from './RequestPipeline';
+import { RequestReferenceAttachments } from './RequestReferenceAttachments';
 
 export const StudentDashboardView: React.FC = () => {
   const {
@@ -26,6 +30,7 @@ export const StudentDashboardView: React.FC = () => {
     navigateTo,
     deleteListing,
     updateRequestStatus,
+    addRequestNote,
     updateOrderStatus,
     setShowAuthModal,
     canPublishModel,
@@ -93,12 +98,12 @@ export const StudentDashboardView: React.FC = () => {
     }
   };
 
-  const handleUpdateReqStatus = async (reqId: string, newStatus: RequestStatus) => {
+  const handleUpdateReqStatus = async (reqId: string, next: RequestStatus | null) => {
+    if (!next) return;
     setActionError(null);
     try {
-      await updateRequestStatus(reqId, newStatus, `Student maker updated status to ${newStatus}`);
-      setActionSuccess(`Status updated to ${newStatus}`);
-      setTimeout(() => setActionSuccess(null), 3000);
+      await updateRequestStatus(reqId, next);
+      setActionSuccess(`Status updated to ${requestStatusLabel(next)}`);
     } catch (err: any) {
       setActionError(err.message || 'Failed to update request status.');
     }
@@ -330,7 +335,7 @@ export const StudentDashboardView: React.FC = () => {
               {incomingOrders.map((ord) => (
                 <div
                   key={ord.id}
-                  className="bg-white rounded border border-slate-200 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs"
+                  className="bg-white rounded border border-slate-200 p-4 sm:p-5 space-y-4 shadow-xs"
                 >
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
@@ -355,33 +360,10 @@ export const StudentDashboardView: React.FC = () => {
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[10px] font-mono uppercase text-slate-400 font-bold block sm:hidden">
-                      Update Production State:
-                    </span>
-                    {ord.status === 'requested' && (
-                      <button
-                        onClick={() => handleUpdateOrdStatus(ord.id, 'inProduction')}
-                        className="px-3 py-1.5 bg-slate-900 hover:bg-red-600 text-white rounded text-[11px] font-mono font-bold uppercase tracking-wider transition-colors"
-                      >
-                        Start 3D Printing
-                      </button>
-                    )}
-                    {ord.status === 'inProduction' && (
-                      <button
-                        onClick={() => handleUpdateOrdStatus(ord.id, 'ready')}
-                        className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded text-[11px] font-mono font-bold uppercase tracking-wider transition-colors"
-                      >
-                        Mark Ready for Pickup
-                      </button>
-                    )}
-                    {ord.status === 'ready' && (
-                      <button
-                        onClick={() => handleUpdateOrdStatus(ord.id, 'completed')}
-                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white rounded text-[11px] font-mono font-bold uppercase tracking-wider transition-colors"
-                      >
-                        Mark Completed
-                      </button>
-                    )}
+                    {canPublishModel && <button onClick={() => navigateTo('teacher_dashboard')}
+                      className="bg-slate-900 hover:bg-red-700 px-3 py-2 rounded text-white text-xs font-bold">
+                      Manage stages & order details
+                    </button>}
                   </div>
                 </div>
               ))}
@@ -410,7 +392,7 @@ export const StudentDashboardView: React.FC = () => {
               {assignedRequests.map((req) => (
                 <div
                   key={req.id}
-                  className="bg-white rounded border border-slate-200 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs"
+                  className="bg-white rounded border border-slate-200 p-4 sm:p-5 space-y-4 shadow-xs"
                 >
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
@@ -418,7 +400,7 @@ export const StudentDashboardView: React.FC = () => {
                         {req.ticketNumber}
                       </span>
                       <span className="px-2 py-0.5 bg-purple-50 text-purple-800 border border-purple-200 rounded text-[10px] font-mono font-bold uppercase">
-                        {req.status}
+                        {requestStatusLabel(req.status)}
                       </span>
                     </div>
                     <h4 className="text-sm font-extrabold uppercase tracking-tight text-slate-900">
@@ -430,26 +412,27 @@ export const StudentDashboardView: React.FC = () => {
                     <div className="text-xs text-slate-500 font-mono">
                       Requester: <strong>{req.requesterDisplayName}</strong> • Needed By: {req.neededByDate}
                     </div>
+
+                    <div className="text-xs text-slate-500">
+                      Size: {req.desiredSize || req.desiredDimensions || 'Not specified'} • {req.colorMode === 'multicolor' ? 'Multicolor' : 'Solid / unspecified'}: {req.color || 'Not specified'}
+                    </div>
+                    <RequestReferenceAttachments request={req} />
                   </div>
 
+                  <RequestPipeline status={req.status} />
+                  <div className="text-xs text-slate-600"><strong>Dimensions:</strong> {displayRequestedDimensions(req)} · <strong>Quantity:</strong> {req.quantity || 1}</div>
                   <div className="flex items-center gap-2">
-                    {req.status === 'underReview' && (
+                    {nextRequestStatus(req.status) && (
                       <button
-                        onClick={() => handleUpdateReqStatus(req.id, 'inProduction')}
-                        className="px-3 py-1.5 bg-purple-700 hover:bg-purple-800 text-white rounded text-[11px] font-mono font-bold uppercase tracking-wider transition-colors"
+                        type="button"
+                        onClick={() => handleUpdateReqStatus(req.id, nextRequestStatus(req.status))}
+                        className="px-3 py-1.5 bg-[#C41E3A] hover:bg-[#99162D] text-white rounded text-[11px] font-bold"
                       >
-                        Queue on Print Bed
-                      </button>
-                    )}
-                    {req.status === 'inProduction' && (
-                      <button
-                        onClick={() => handleUpdateReqStatus(req.id, 'ready')}
-                        className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded text-[11px] font-mono font-bold uppercase tracking-wider transition-colors"
-                      >
-                        Mark Ready
+                        Move to: {requestStatusLabel(nextRequestStatus(req.status)!)}
                       </button>
                     )}
                   </div>
+                  <RequestNotesPanel requestId={req.id} onAddNote={addRequestNote} />
                 </div>
               ))}
             </div>

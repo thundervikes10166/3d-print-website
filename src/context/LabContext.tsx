@@ -22,8 +22,12 @@ import {
   updateDoc,
   deleteDoc,
   serverTimestamp,
+  runTransaction,
+  writeBatch,
 } from 'firebase/firestore';
 import { auth, db, googleProvider, isFirebaseConfigured } from '../lib/firebase';
+import { isAdjacentRequestStage } from '../lib/requestWorkflow';
+import { isAdjacentOrderStage } from '../lib/orderWorkflow';
 import {
   UserProfile,
   Listing,
@@ -37,6 +41,7 @@ import {
   MaterialInventoryItem,
   BASELINE_ADMIN_WHITELIST,
   ClassStudent,
+  ClassStudentApplication,
 } from '../types';
 
 interface LabContextType {
@@ -84,6 +89,8 @@ interface LabContextType {
 
   // Whitelist & Role Flags
   isAdminWhitelisted: boolean;
+  canManageStore: boolean;
+  canManageAccounts: boolean;
   isPrintHandler: boolean;
   canModifyPrintStatus: (sellerId?: string) => boolean;
 
@@ -104,11 +111,14 @@ interface LabContextType {
   // Firestore Operations (Custom Requests)
   createCustomRequest: (requestData: Omit<CustomRequest, 'id' | 'ticketNumber' | 'createdAt' | 'status'>) => Promise<string>;
   updateRequestStatus: (requestId: string, status: RequestStatus, note?: string) => Promise<void>;
+  addRequestNote: (requestId: string, note: string) => Promise<void>;
+  updateRequestDetails: (requestId: string, updates: Partial<CustomRequest>) => Promise<void>;
   assignMakerToRequest: (requestId: string, makerId: string, makerName: string) => Promise<void>;
 
   // Firestore Operations (Orders)
   createOrder: (orderData: Omit<Order, 'id' | 'createdAt' | 'status'>) => Promise<string>;
   updateOrderStatus: (orderId: string, status: OrderStatus, note?: string) => Promise<void>;
+  updateOrderDetails: (orderId: string, updates: Partial<Order>) => Promise<void>;
   confirmCashDeposit: (orderId: string, amount: number) => Promise<void>;
 
   // Categories & Inventory Management (Teachers/Admins)
@@ -118,6 +128,9 @@ interface LabContextType {
 
   // Class Students & Model Publishing Authorization
   classStudents: ClassStudent[];
+  studentApplications: ClassStudentApplication[];
+  approveStudentApplication: (uid: string) => Promise<void>;
+  rejectStudentApplication: (uid: string) => Promise<void>;
   canPublishModel: boolean;
   addClassStudent: (email: string, name?: string, period?: string, notes?: string) => Promise<void>;
   removeClassStudent: (studentId: string) => Promise<void>;
@@ -130,24 +143,8 @@ interface LabContextType {
   removeAdminEmail: (email: string) => Promise<void>;
 }
 
-const loadInitialClassStudents = (): ClassStudent[] => {
-  try {
-    const cached = localStorage.getItem('lab_class_students');
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      if (Array.isArray(parsed)) {
-        const realStudents = parsed.filter(
-          (student) => !String(student?.id || '').startsWith('student-seed-')
-        );
-        if (realStudents.length !== parsed.length) {
-          localStorage.setItem('lab_class_students', JSON.stringify(realStudents));
-        }
-        return realStudents;
-      }
-    }
-  } catch {}
-  return [];
-};
+// Legacy local browser caches must never grant elevated privileges.
+const loadInitialClassStudents = (): ClassStudent[] => [];
 
 const loadInitialAdminWhitelist = (): string[] => {
   try {
@@ -240,30 +237,9 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setPaymentModalData(null);
   };
 
-  // Explicit Backend Whitelist verification (Requirement 6)
-  // A whitelisted email alone does not grant Firestore permissions.
-  // The account must also have the admin role in its Firestore users/{uid} document.
-  const isAdminWhitelisted = Boolean(
-    currentUser?.email &&
-    isWhitelistedAdminEmail(currentUser.email) &&
-    userProfile?.role === 'admin'
-  );
-
-  // Print Handler privileges (Requirement 5)
-  const isPrintHandler = Boolean(
-    isAdminWhitelisted ||
-    userProfile?.role === 'teacher' ||
-    userProfile?.role === 'admin' ||
-    userProfile?.isPrintHandler
-  );
-
-  const canModifyPrintStatus = (sellerId?: string): boolean => {
-    if (!currentUser) return false;
-    if (isAdminWhitelisted) return true;
-    if (userProfile?.role === 'teacher' || userProfile?.role === 'admin' || userProfile?.isPrintHandler) return true;
-    if (sellerId && sellerId === currentUser.uid) return true;
-    return false;
-  };
+  // Trusted backend role is the source of admin authorization.
+  // An editable client-side allowlist cannot securely grant or revoke this role.
+  const isAdminWhitelisted = Boolean(currentUser && userProfile?.role === 'admin');
 
   // Firestore collections state
   const [listings, setListings] = useState<Listing[]>([]);
@@ -272,20 +248,26 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [orders, setOrders] = useState<Order[]>([]);
   const [inventory, setInventory] = useState<MaterialInventoryItem[]>([]);
   const [classStudents, setClassStudents] = useState<ClassStudent[]>(loadInitialClassStudents);
+  const [studentApplications, setStudentApplications] = useState<ClassStudentApplication[]>([]);
   const [isLoadingData, setIsLoadingData] = useState<boolean>(true);
   const [firebaseConnectionError, setFirebaseConnectionError] = useState<string | null>(null);
 
+  // Print Handler privileges (Requirement 5)
+  // Store operators are verified Firebase admins or an APPROVED class-student
+  // document keyed to the signed-in user's Auth UID. Email-only entries are
+  // intentionally not enough to grant staff access.
+  const isApprovedClassStudent = Boolean(currentUser && classStudents.some(student =>
+    student.id === currentUser.uid && student.approved === true && student.canPublish === true
+  ));
+  const canManageAccounts = Boolean(isAdminWhitelisted);
+  const canManageStore = Boolean(isAdminWhitelisted || (userProfile?.role === 'teacher' || userProfile?.role === 'teacher_admin') || isApprovedClassStudent);
+
+  const isPrintHandler = canManageStore;
+
+  const canModifyPrintStatus = (_sellerId?: string): boolean => canManageStore;
+
   // Model Publishing Access: Whitelisted admins, teachers, and enrolled class students
-  const canPublishModel = Boolean(
-    currentUser && (
-      isAdminWhitelisted ||
-      userProfile?.role === 'teacher' ||
-      userProfile?.role === 'admin' ||
-      classStudents.some(
-        (s) => s.email?.toLowerCase() === currentUser.email?.toLowerCase() && s.canPublish !== false
-      )
-    )
-  );
+  const canPublishModel = canManageStore;
 
   const clearAuthError = () => setAuthError(null);
 
@@ -322,6 +304,12 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             };
             await setDoc(userDocRef, newProfile);
             setUserProfile(newProfile);
+            // First-time Google users also appear in the admin approval queue.
+            await setDoc(doc(db, 'class_student_applications', user.uid), {
+              uid: user.uid, email: (user.email || '').trim().toLowerCase(),
+              name: newProfile.displayName || 'New user', status: 'pending',
+              createdAt: serverTimestamp(),
+            });
           }
         } catch (err: any) {
           console.error('Error fetching user profile from Firestore:', err);
@@ -354,7 +342,7 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // rules are NOT filters: querying all listings as a visitor is denied.
     // Signed-in makers also receive their own drafts/pending listings.
     // Authorized teachers/admins may fetch all listings for moderation.
-    const canModerateListings = userProfile?.role === 'teacher' || userProfile?.role === 'admin';
+    const canModerateListings = canManageStore;
     let publishedOrAllListings: Listing[] = [];
     let ownListings: Listing[] = [];
     const updateVisibleListings = () => {
@@ -428,26 +416,32 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     );
 
-    // Fetch / Listen to Class Students (Publishing Whitelist)
-    const unsubClassStudents = onSnapshot(
-      collection(db, 'class_students'),
-      (snapshot) => {
-        const students: ClassStudent[] = [];
-        snapshot.forEach((docSnap) => {
-          students.push({ id: docSnap.id, ...docSnap.data() } as ClassStudent);
-        });
-        setClassStudents(students);
-        try {
-          localStorage.setItem('lab_class_students', JSON.stringify(students));
-        } catch {}
+    // Approved student memberships are tied to Firebase Auth UIDs, never to
+    // editable client-side emails or localStorage lists.
+    const studentMembershipSource = currentUser
+      ? (canManageAccounts ? collection(db, 'class_students') : doc(db, 'class_students', currentUser.uid))
+      : null;
+    const unsubClassStudents = studentMembershipSource ? onSnapshot(
+      studentMembershipSource as any,
+      (snapshot: any) => {
+        if ('docs' in snapshot) {
+          setClassStudents(snapshot.docs.map((d: any) => ({ id: d.id, ...d.data() } as ClassStudent)));
+        } else {
+          setClassStudents(snapshot.exists() ? [{ id: snapshot.id, ...snapshot.data() } as ClassStudent] : []);
+        }
       },
-      (err) => {
-        console.warn('Class students collection query notice:', err);
-      }
-    );
+      (err: any) => console.warn('Class students subscription error:', err)
+    ) : () => { setClassStudents([]); };
+
+    const unsubStudentApplications = currentUser && canManageAccounts ? onSnapshot(
+      collection(db, 'class_student_applications'),
+      snapshot => setStudentApplications(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ClassStudentApplication))
+        .sort((a,b) => getTimestampMillis(b.createdAt) - getTimestampMillis(a.createdAt))),
+      err => console.warn('Student applications subscription error:', err)
+    ) : () => { setStudentApplications([]); };
 
     // Fetch / Listen to Admin Whitelist
-    const unsubAdminWhitelist = onSnapshot(
+    const unsubAdminWhitelist = currentUser && canManageAccounts ? onSnapshot(
       collection(db, 'admin_whitelist'),
       (snapshot) => {
         if (!snapshot.empty) {
@@ -468,7 +462,7 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       (err) => {
         console.warn('Admin whitelist listener notice:', err);
       }
-    );
+    ) : () => {};
 
     return () => {
       unsubListings();
@@ -476,9 +470,10 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubCategories();
       unsubInventory();
       unsubClassStudents();
+      unsubStudentApplications();
       unsubAdminWhitelist();
     };
-  }, [currentUser?.uid, userProfile?.role]);
+  }, [currentUser?.uid, userProfile?.role, canManageStore, canManageAccounts]);
 
   // 3. User-Specific / Role-Specific Listeners (Requests and Orders)
   useEffect(() => {
@@ -488,28 +483,33 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
 
-    const isTeacher = userProfile?.role === 'teacher' || userProfile?.role === 'admin';
+    const isTeacher = canManageStore;
 
-    // Requests query - avoid composite index requirement by filtering only and sorting client-side
-    const reqQuery = isTeacher
+    // Teachers/admins can read all. Customers can read their own requests.
+    // An assigned student maker additionally receives only requests assigned to them.
+    const isTeacherOrAdmin = isTeacher;
+    const ownRequestsQuery = isTeacherOrAdmin
       ? collection(db, 'requests')
       : query(collection(db, 'requests'), where('requesterId', '==', currentUser.uid));
-
+    let ownRequests: CustomRequest[] = [];
+    let makerRequests: CustomRequest[] = [];
+    const publishRequests = () => {
+      const merged = new Map<string, CustomRequest>();
+      [...ownRequests, ...makerRequests].forEach((request) => merged.set(request.id, request));
+      setRequests(Array.from(merged.values()).sort((a, b) => getTimestampMillis(b.createdAt) - getTimestampMillis(a.createdAt)));
+    };
     const unsubRequests = onSnapshot(
-      reqQuery,
+      ownRequestsQuery,
       (snapshot) => {
-        const reqs: CustomRequest[] = [];
-        snapshot.forEach((docSnap) => {
-          reqs.push({ id: docSnap.id, ...docSnap.data() } as CustomRequest);
-        });
-        // Safe client-side sort by createdAt descending
-        reqs.sort((a, b) => getTimestampMillis(b.createdAt) - getTimestampMillis(a.createdAt));
-        setRequests(reqs);
+        ownRequests = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() } as CustomRequest));
+        publishRequests();
       },
-      (err) => {
-        console.error('Requests subscription error:', err);
-      }
+      (err) => console.error('Requests subscription error:', err)
     );
+    // Unapproved buyers may read only their own requests. No background query
+    // for assigned-maker tickets is made, avoiding Firestore permission errors.
+    const unsubMakerRequests = () => {};
+
 
     // Orders query - avoid composite index requirement by filtering only and sorting client-side
     const ordQuery = isTeacher
@@ -534,9 +534,10 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     return () => {
       unsubRequests();
+      unsubMakerRequests();
       unsubOrders();
     };
-  }, [currentUser, userProfile?.role]);
+  }, [currentUser?.uid, canManageStore]);
 
   // Auth Operations
   const loginWithEmail = async (email: string, pass: string) => {
@@ -553,20 +554,12 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const signUpWithEmail = async (email: string, pass: string, name: string) => {
     setAuthError(null);
     try {
-      const res = await createUserWithEmailAndPassword(auth, email, pass);
-      if (res.user) {
-        await updateProfile(res.user, { displayName: name });
-        const userDocRef = doc(db, 'users', res.user.uid);
-        const profile: UserProfile = {
-          uid: res.user.uid,
-          email: res.user.email,
-          displayName: name,
-          role: 'student', // Strict enforcement: default to student
-          gradeClass: 'Robotics Lab Student',
-          createdAt: serverTimestamp(),
-        };
-        await setDoc(userDocRef, profile);
-        setUserProfile(profile);
+      const result = await createUserWithEmailAndPassword(auth, email, pass);
+      if (result.user) {
+        await updateProfile(result.user, { displayName: name.trim() });
+        // onAuthStateChanged creates the initial student profile and pending
+        // class approval request ONCE. A second setDoc here would race with
+        // that listener and be blocked by the secure update rules.
       }
       setShowAuthModal(false);
     } catch (err: any) {
@@ -609,9 +602,12 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!currentUser) throw new Error('You must be signed in.');
     // Prevent client from escalating role
     const sanitized = { ...data };
-    if (userProfile?.role !== 'teacher' && userProfile?.role !== 'admin') {
-      delete sanitized.role;
-    }
+    // Identity and authorization fields can only change through trusted admins.
+    delete sanitized.role;
+    delete sanitized.isPrintHandler;
+    delete sanitized.uid;
+    delete sanitized.email;
+    delete sanitized.isWhitelistedAdmin;
     const docRef = doc(db, 'users', currentUser.uid);
     await updateDoc(docRef, sanitized);
     setUserProfile((prev) => (prev ? { ...prev, ...sanitized } : null));
@@ -635,9 +631,8 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   ): Promise<string> => {
     if (!currentUser) throw new Error('Authentication required to create a listing.');
     
-    // Status defaults to pendingApproval for students, published for teachers
-    const isTeacher = userProfile?.role === 'teacher' || userProfile?.role === 'admin';
-    const statusToSet: ListingStatus = isTeacher ? 'published' : 'pendingApproval';
+    if (!canManageStore) throw new Error('Only approved class students and administrators can publish products.');
+    const statusToSet: ListingStatus = 'published';
 
     const newDoc = {
       ...listingData,
@@ -657,7 +652,7 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateListing = async (listingId: string, updates: Partial<Listing>) => {
-    if (!currentUser) throw new Error('Authentication required.');
+    if (!canManageStore) throw new Error('Staff approval required.');
     const docRef = doc(db, 'listings', listingId);
     await updateDoc(docRef, {
       ...updates,
@@ -666,7 +661,7 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteListing = async (listingId: string) => {
-    if (!currentUser) throw new Error('Authentication required.');
+    if (!canManageStore) throw new Error('Staff approval required.');
     const docRef = doc(db, 'listings', listingId);
     await deleteDoc(docRef);
   };
@@ -696,26 +691,20 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!currentUser) throw new Error('Authentication required to submit custom requests.');
 
     const ticketNumber = `REQ-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
-    const timestampStr = new Date().toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-
-    const newRequest: any = {
+    const newRequest: Omit<CustomRequest, 'id'> = {
       ...requestData,
       ticketNumber,
       requesterId: currentUser.uid,
-      requesterDisplayName: userProfile?.displayName || currentUser.displayName || 'Requester',
-      status: 'submitted' as RequestStatus,
-      statusLog: [
-        {
-          status: 'submitted' as RequestStatus,
-          timestamp: timestampStr,
-          note: 'Request received in lab queue. Awaiting safety & CAD review.',
-        },
-      ],
+      requesterDisplayName: requestData.requesterDisplayName || userProfile?.displayName || currentUser.displayName || 'Requester',
+      status: 'submitted',
+      statusLog: [{
+        status: 'submitted',
+        timestamp: new Date().toISOString(),
+        note: 'Quote request submitted.',
+        changedByUid: currentUser.uid,
+        changedByName: requestData.requesterDisplayName || currentUser.displayName || currentUser.email || 'Requester',
+        changedByEmail: currentUser.email || '',
+      }],
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     };
@@ -724,37 +713,85 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return docRef.id;
   };
 
+  const ensureRequestEditor = (request: CustomRequest) => {
+    if (!currentUser) throw new Error('Authentication required.');
+    if (!canManageStore) throw new Error('An approved class-student or administrator account is required.');
+  };
+
   const updateRequestStatus = async (
     requestId: string,
     status: RequestStatus,
     note?: string
-  ) => {
+  ): Promise<void> => {
     if (!currentUser) throw new Error('Authentication required.');
     const docRef = doc(db, 'requests', requestId);
-    const snap = await getDoc(docRef);
-    if (!snap.exists()) throw new Error('Request not found.');
-
-    const currentData = snap.data() as CustomRequest;
-    const timestampStr = new Date().toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
+    await runTransaction(db, async (transaction) => {
+      const snap = await transaction.get(docRef);
+      if (!snap.exists()) throw new Error('Request not found.');
+      const currentData = snap.data() as CustomRequest;
+      ensureRequestEditor(currentData);
+      if (!isAdjacentRequestStage(currentData.status, status)) {
+        throw new Error('Move one stage forward or backward from the current request stage.');
+      }
+      const nextLog = [
+        ...(currentData.statusLog || []),
+        {
+          status,
+          timestamp: new Date().toISOString(),
+          note: note?.trim() || `Moved to ${status}`,
+          changedByUid: currentUser.uid,
+          changedByName: userProfile?.displayName || currentUser.displayName || currentUser.email || 'Staff member',
+          changedByEmail: currentUser.email || '',
+        },
+      ];
+      transaction.update(docRef, { status, statusLog: nextLog, updatedAt: serverTimestamp() });
     });
+  };
 
-    const newLog = [
-      ...(currentData.statusLog || []),
-      {
-        status,
-        timestamp: timestampStr,
-        note: note || `Status updated to ${status}`,
-      },
-    ];
+  const updateRequestDetails = async (requestId: string, updates: Partial<CustomRequest>): Promise<void> => {
+    if (!currentUser || !canManageStore) throw new Error('Staff approval required.');
+    const allowed = [
+      'itemTitle', 'description', 'quantity', 'desiredSize', 'desiredDimensions',
+      'material', 'color', 'colorMode', 'neededByDate', 'estimatedCost',
+      'contactEmail', 'contactPhone', 'pickupLocation',
+    ] as const;
+    const cleanUpdates: Record<string, any> = {};
+    allowed.forEach(key => { if (key in updates) cleanUpdates[key] = updates[key]; });
+    if ('quantity' in cleanUpdates && (!Number.isInteger(cleanUpdates.quantity) || cleanUpdates.quantity < 1 || cleanUpdates.quantity > 1000)) {
+      throw new Error('Quantity must be between 1 and 1000.');
+    }
+    if (!Object.keys(cleanUpdates).length) return;
+    await runTransaction(db, async transaction => {
+      const ref = doc(db, 'requests', requestId);
+      const snap = await transaction.get(ref);
+      if (!snap.exists()) throw new Error('Request not found.');
+      const previous = snap.data() as CustomRequest;
+      transaction.update(ref, {
+        ...cleanUpdates,
+        editLog: [...(previous.editLog || []), {
+          timestamp: new Date().toISOString(), changedByUid: currentUser.uid,
+          changedByName: userProfile?.displayName || currentUser.email || 'Staff member',
+          fields: Object.keys(cleanUpdates),
+        }],
+        updatedAt: serverTimestamp(),
+      });
+    });
+  };
 
-    await updateDoc(docRef, {
-      status,
-      statusLog: newLog,
-      updatedAt: serverTimestamp(),
+  const addRequestNote = async (requestId: string, text: string): Promise<void> => {
+    if (!currentUser) throw new Error('Authentication required.');
+    const content = text.trim();
+    if (!content || content.length > 2000) throw new Error('Notes must contain 1 to 2000 characters.');
+    const requestSnap = await getDoc(doc(db, 'requests', requestId));
+    if (!requestSnap.exists()) throw new Error('Request not found.');
+    ensureRequestEditor(requestSnap.data() as CustomRequest);
+    await addDoc(collection(db, 'requests', requestId, 'staffNotes'), {
+      text: content,
+      timestamp: new Date().toISOString(),
+      createdAt: serverTimestamp(),
+      authorUid: currentUser.uid,
+      authorName: userProfile?.displayName || currentUser.displayName || currentUser.email || 'Staff member',
+      authorEmail: currentUser.email || '',
     });
   };
 
@@ -762,13 +799,14 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     requestId: string,
     makerId: string,
     makerName: string
-  ) => {
-    if (!currentUser) throw new Error('Authentication required.');
-    const docRef = doc(db, 'requests', requestId);
-    await updateDoc(docRef, {
+  ): Promise<void> => {
+    if (!currentUser || !canManageStore) {
+      throw new Error('Approved staff access is required to assign makers.');
+    }
+    await updateDoc(doc(db, 'requests', requestId), {
       assignedMakerId: makerId,
       assignedMakerName: makerName,
-      status: 'underReview',
+      // Assignment does not silently skip a workflow stage.
       updatedAt: serverTimestamp(),
     });
   };
@@ -779,12 +817,7 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   ): Promise<string> => {
     if (!currentUser) throw new Error('Authentication required to place an order.');
 
-    const timestampStr = new Date().toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    const timestampStr = new Date().toISOString();
 
     const newOrder: any = {
       ...orderData,
@@ -795,7 +828,10 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         {
           status: 'requested' as OrderStatus,
           timestamp: timestampStr,
-          note: 'Print order placed from marketplace. Queued for lab fabrication.',
+          note: 'Shop order submitted.',
+          changedByUid: currentUser.uid,
+          changedByName: userProfile?.displayName || currentUser.email || 'Customer',
+          changedByEmail: currentUser.email || '',
         },
       ],
       createdAt: serverTimestamp(),
@@ -806,50 +842,62 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return docRef.id;
   };
 
-  const updateOrderStatus = async (
-    orderId: string,
-    status: OrderStatus,
-    note?: string
-  ) => {
-    if (!currentUser) throw new Error('Authentication required.');
-    const docRef = doc(db, 'orders', orderId);
-    const snap = await getDoc(docRef);
-    if (!snap.exists()) throw new Error('Order not found.');
-
-    const currentData = snap.data() as Order;
-
-    // Security Check: Only whitelisted admins, print handlers, or the assigned seller/maker can update status
-    if (!canModifyPrintStatus(currentData.sellerId)) {
-      throw new Error('Authorization required: Only designated print handlers or the assigned student maker can toggle print status.');
-    }
-
-    const timestampStr = new Date().toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-
-    const newLog = [
-      ...(currentData.statusLog || []),
-      {
+  const updateOrderStatus = async (orderId: string, status: OrderStatus, note?: string) => {
+    if (!currentUser || !canManageStore) throw new Error('Approved staff access required.');
+    await runTransaction(db, async transaction => {
+      const ref = doc(db, 'orders', orderId);
+      const snap = await transaction.get(ref);
+      if (!snap.exists()) throw new Error('Order not found.');
+      const existing = snap.data() as Order;
+      if (!isAdjacentOrderStage(existing.status, status)) {
+        throw new Error('Move one stage forward or backward from the current shop order stage.');
+      }
+      const entry = {
         status,
-        timestamp: timestampStr,
-        note: note || `Order status updated to ${status}`,
-      },
-    ];
+        timestamp: new Date().toISOString(),
+        note: note?.trim() || `Moved to ${status}`,
+        changedByUid: currentUser.uid,
+        changedByName: userProfile?.displayName || currentUser.email || 'Staff member',
+        changedByEmail: currentUser.email || '',
+      };
+      transaction.update(ref, {
+        status,
+        statusLog: [...(existing.statusLog || []), entry],
+        updatedAt: serverTimestamp(),
+      });
+    });
+  };
 
-    await updateDoc(docRef, {
-      status,
-      statusLog: newLog,
-      updatedAt: serverTimestamp(),
+  const updateOrderDetails = async (orderId: string, updates: Partial<Order>): Promise<void> => {
+    if (!currentUser || !canManageStore) throw new Error('Approved staff access required.');
+    const allowed = ['quantity','selectedColor','selectedMaterial','notes','pickupLocation','contactEmail','contactPhone'] as const;
+    const cleanUpdates: Record<string, any> = {};
+    allowed.forEach(key => { if (key in updates) cleanUpdates[key] = updates[key]; });
+    if ('quantity' in cleanUpdates && (!Number.isInteger(cleanUpdates.quantity) || cleanUpdates.quantity < 1 || cleanUpdates.quantity > 1000)) {
+      throw new Error('Quantity must be between 1 and 1000.');
+    }
+    if (!Object.keys(cleanUpdates).length) return;
+    await runTransaction(db, async transaction => {
+      const ref = doc(db, 'orders', orderId);
+      const snap = await transaction.get(ref);
+      if (!snap.exists()) throw new Error('Order not found.');
+      const existing = snap.data() as Order;
+      transaction.update(ref, {
+        ...cleanUpdates,
+        editLog: [...(existing.editLog || []), {
+          timestamp: new Date().toISOString(), changedByUid: currentUser.uid,
+          changedByName: userProfile?.displayName || currentUser.email || 'Staff member',
+          fields: Object.keys(cleanUpdates),
+        }],
+        updatedAt: serverTimestamp(),
+      });
     });
   };
 
   const confirmCashDeposit = async (orderId: string, amount: number) => {
     if (!currentUser) throw new Error('Authentication required.');
-    if (userProfile?.role !== 'teacher' && userProfile?.role !== 'admin' && !isAdminWhitelisted) {
-      throw new Error('Only a teacher or administrator can confirm a cash deposit.');
+    if (!canManageAccounts) {
+      throw new Error('Only an administrator can confirm a cash deposit.');
     }
     if (!Number.isFinite(amount) || amount <= 0) {
       throw new Error('Deposit amount must be greater than zero.');
@@ -860,19 +908,17 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!snap.exists()) throw new Error('Order not found.');
 
     const currentData = snap.data() as Order;
-    const timestampStr = new Date().toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    const timestampStr = new Date().toISOString();
     const receiptId = `CASH-${Date.now().toString().slice(-8)}`;
     const newLog = [
       ...(currentData.statusLog || []),
       {
         status: currentData.status,
         timestamp: timestampStr,
-        note: `Cash deposit of $${amount.toFixed(2)} confirmed by teacher (${receiptId}).`,
+        note: `Cash deposit of $${amount.toFixed(2)} confirmed (${receiptId}).`,
+        changedByUid: currentUser.uid,
+        changedByName: userProfile?.displayName || currentUser.email || 'Administrator',
+        changedByEmail: currentUser.email || '',
       },
     ];
 
@@ -888,7 +934,7 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Categories & Inventory
   const addCategory = async (name: string, description?: string) => {
-    if (!currentUser) throw new Error('Teacher authentication required.');
+    if (!canManageStore) throw new Error('Approved staff access required.');
     await addDoc(collection(db, 'categories'), {
       name,
       description: description || '',
@@ -897,14 +943,14 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteCategory = async (categoryId: string) => {
-    if (!currentUser || (userProfile?.role !== 'teacher' && userProfile?.role !== 'admin')) {
-      throw new Error('Administrator authentication required.');
+    if (!canManageStore) {
+      throw new Error('Approved staff access required.');
     }
     await deleteDoc(doc(db, 'categories', categoryId));
   };
 
   const updateInventoryItem = async (id: string, spools: number) => {
-    if (!currentUser) throw new Error('Teacher authentication required.');
+    if (!canManageStore) throw new Error('Approved staff access required.');
     const docRef = doc(db, 'inventory', id);
     const status = spools > 2 ? 'In Stock' : spools > 0 ? 'Low' : 'Out of Stock';
     await updateDoc(docRef, {
@@ -914,87 +960,75 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  // Class Students (Publishing Whitelist) Management
-  const addClassStudent = async (email: string, name?: string, period?: string, notes?: string) => {
-    const cleanEmail = email.trim().toLowerCase();
-    if (!cleanEmail) throw new Error('Student email is required.');
-    
-    // Check if student is already in list
-    if (classStudents.some((s) => s.email?.toLowerCase() === cleanEmail)) {
-      throw new Error(`Student with email "${cleanEmail}" is already enrolled in the class roster.`);
-    }
-
-    const newStudentData: Omit<ClassStudent, 'id'> = {
-      email: cleanEmail,
-      name: name?.trim() || cleanEmail.split('@')[0],
-      period: period?.trim() || 'Period 3 Robotics',
-      canPublish: true,
-      notes: notes?.trim() || '',
-      addedAt: new Date().toISOString(),
-      addedBy: currentUser?.email || 'Teacher/Admin',
-    };
-
-    try {
-      const docRef = await addDoc(collection(db, 'class_students'), {
-        ...newStudentData,
-        createdAt: serverTimestamp(),
-      });
-      const created: ClassStudent = { id: docRef.id, ...newStudentData };
-      setClassStudents((prev) => {
-        const updated = [created, ...prev.filter((s) => s.id !== docRef.id)];
-        try {
-          localStorage.setItem('lab_class_students', JSON.stringify(updated));
-        } catch {}
-        return updated;
-      });
-    } catch (err) {
-      console.warn('Firestore addDoc for class_students failed, falling back to local state:', err);
-      const fallbackId = 'student-' + Date.now();
-      const created: ClassStudent = { id: fallbackId, ...newStudentData };
-      setClassStudents((prev) => {
-        const updated = [created, ...prev];
-        try {
-          localStorage.setItem('lab_class_students', JSON.stringify(updated));
-        } catch {}
-        return updated;
-      });
-    }
+  // Admin-only class student approval and roster management. These records
+  // authorize access, but removing one cannot delete Firebase Auth identities.
+  const approveStudentApplication = async (uid: string): Promise<void> => {
+    if (!currentUser || !canManageAccounts) throw new Error('Administrator access required.');
+    const application = studentApplications.find(a => a.uid === uid && a.status === 'pending');
+    if (!application) throw new Error('Pending application not found.');
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'class_students', uid), {
+      uid, email: application.email, name: application.name,
+      period: 'Robotics / Makers', canPublish: true, approved: true,
+      approvedAt: new Date().toISOString(), approvedBy: currentUser.email || currentUser.uid,
+      addedAt: new Date().toISOString(), addedBy: currentUser.email || currentUser.uid,
+    }, { merge: true });
+    batch.update(doc(db, 'class_student_applications', uid), {
+      status: 'approved', reviewedAt: serverTimestamp(), reviewedBy: currentUser.email || currentUser.uid,
+    });
+    await batch.commit();
   };
 
-  const removeClassStudent = async (studentId: string) => {
-    try {
-      await deleteDoc(doc(db, 'class_students', studentId));
-    } catch (err) {
-      console.warn('Firestore deleteDoc for class_students notice:', err);
-    }
-    setClassStudents((prev) => {
-      const updated = prev.filter((s) => s.id !== studentId);
-      try {
-        localStorage.setItem('lab_class_students', JSON.stringify(updated));
-      } catch {}
-      return updated;
+  const rejectStudentApplication = async (uid: string): Promise<void> => {
+    if (!currentUser || !canManageAccounts) throw new Error('Administrator access required.');
+    const application = studentApplications.find(a => a.uid === uid && a.status === 'pending');
+    if (!application) throw new Error('Pending application not found.');
+    await updateDoc(doc(db, 'class_student_applications', uid), {
+      status: 'rejected', reviewedAt: serverTimestamp(), reviewedBy: currentUser.email || currentUser.uid,
     });
   };
 
+  const addClassStudent = async (email: string, name?: string, period?: string, notes?: string) => {
+    if (!currentUser || !canManageAccounts) throw new Error('Only admins can approve students.');
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) throw new Error('Student email is required.');
+    const existingAccounts = await getDocs(query(collection(db,'users'),where('email','==',cleanEmail)));
+    if (existingAccounts.empty) throw new Error('This email must register an account before it can be added. Ask the student to sign up first.');
+    const found = existingAccounts.docs[0];
+    const uid = found.id;
+    await setDoc(doc(db, 'class_students', uid), {
+      uid, email: cleanEmail, name: name?.trim() || found.data().displayName || cleanEmail,
+      period: period?.trim() || 'Robotics / Makers', notes: notes?.trim() || '',
+      canPublish: true, approved: true,
+      approvedAt: new Date().toISOString(), approvedBy: currentUser.email || currentUser.uid,
+      addedAt: new Date().toISOString(), addedBy: currentUser.email || currentUser.uid,
+    }, { merge: true });
+    const applicationRef = doc(db, 'class_student_applications', uid);
+    const applicationSnap = await getDoc(applicationRef);
+    if (applicationSnap.exists()) await updateDoc(applicationRef, {
+      status: 'approved', reviewedAt: serverTimestamp(), reviewedBy: currentUser.email || currentUser.uid,
+    });
+  };
+
+  const removeClassStudent = async (studentId: string) => {
+    if (!canManageAccounts) throw new Error('Only admins can remove students.');
+    await deleteDoc(doc(db, 'class_students', studentId));
+  };
+
   const updateClassStudent = async (studentId: string, updates: Partial<ClassStudent>) => {
-    try {
-      await updateDoc(doc(db, 'class_students', studentId), {
-        ...updates,
-        updatedAt: serverTimestamp(),
-      });
-    } catch (err) {
-      console.warn('Firestore updateDoc for class_students notice:', err);
+    if (!canManageAccounts) throw new Error('Only admins can edit student access.');
+    const clean: Record<string, unknown> = {};
+    for (const key of ['canPublish','period','name','notes'] as const) {
+      if (key in updates) clean[key] = updates[key];
     }
-    setClassStudents((prev) => {
-      const updated = prev.map((s) => (s.id === studentId ? { ...s, ...updates } : s));
-      try {
-        localStorage.setItem('lab_class_students', JSON.stringify(updated));
-      } catch {}
-      return updated;
+    if (!Object.keys(clean).length) return;
+    await updateDoc(doc(db, 'class_students', studentId), {
+      ...clean, updatedAt: serverTimestamp(),
     });
   };
 
   const addAdminEmail = async (email: string) => {
+    if (!canManageAccounts) throw new Error('Only admins can manage accounts.');
     const clean = email.trim().toLowerCase();
     if (!clean) throw new Error('Please enter a valid administrator email address.');
     if (adminWhitelist.map((e) => e.toLowerCase()).includes(clean)) {
@@ -1018,6 +1052,7 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const removeAdminEmail = async (email: string) => {
+    if (!canManageAccounts) throw new Error('Only admins can manage accounts.');
     const clean = email.trim().toLowerCase();
     if (clean === BASELINE_ADMIN_WHITELIST[0].toLowerCase()) {
       throw new Error(`The primary root administrator (${BASELINE_ADMIN_WHITELIST[0]}) cannot be removed.`);
@@ -1077,6 +1112,8 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         firebaseConnectionError,
         isConfigured: isFirebaseConfigured,
         isAdminWhitelisted,
+        canManageStore,
+        canManageAccounts,
         isPrintHandler,
         canModifyPrintStatus,
         showPaymentModal,
@@ -1091,14 +1128,20 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         rejectListing,
         createCustomRequest,
         updateRequestStatus,
+        addRequestNote,
+        updateRequestDetails,
         assignMakerToRequest,
         createOrder,
         updateOrderStatus,
+        updateOrderDetails,
         confirmCashDeposit,
         addCategory,
         deleteCategory,
         updateInventoryItem,
         classStudents,
+        studentApplications,
+        approveStudentApplication,
+        rejectStudentApplication,
         canPublishModel,
         addClassStudent,
         removeClassStudent,

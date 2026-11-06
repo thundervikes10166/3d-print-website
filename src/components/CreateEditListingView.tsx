@@ -19,7 +19,8 @@ const CATEGORIES: Category[] = [
   'Robotics',
   'Decorations',
   'Games',
-  'Tools',
+  'Toys',
+  'Woodwork',
   'Other',
 ];
 
@@ -29,6 +30,7 @@ export const CreateEditListingView: React.FC = () => {
   const {
     currentUser,
     userProfile,
+    canPublishModel,
     editingListingId,
     listings,
     createListing,
@@ -44,7 +46,10 @@ export const CreateEditListingView: React.FC = () => {
 
   const [title, setTitle] = useState(existingListing?.title || existingListing?.name || '');
   const [description, setDescription] = useState(existingListing?.description || '');
-  const [category, setCategory] = useState<Category>((existingListing?.category as Category) || 'Robotics');
+  const initialCategory = (existingListing?.category as Category) || 'Robotics';
+  const [category, setCategory] = useState<Category>(
+    CATEGORIES.includes(initialCategory) ? initialCategory : 'Robotics'
+  );
   const [price, setPrice] = useState<number>(existingListing?.price ?? existingListing?.priceAmount ?? 3.5);
   const [priceType, setPriceType] = useState<'fixed' | 'quote'>(existingListing?.priceType || 'fixed');
   const [material, setMaterial] = useState<MaterialType>((existingListing?.material as MaterialType) || 'PLA');
@@ -134,7 +139,7 @@ export const CreateEditListingView: React.FC = () => {
           supportedMaterials: [material],
           availableColors: colorsArray.length > 0 ? colorsArray : ['Standard White', 'Stealth Black'],
         },
-        status: userProfile?.role === 'teacher' || userProfile?.role === 'admin' ? 'published' : 'pendingApproval',
+        status: 'published',
       };
 
       if (editingListingId) {
@@ -143,9 +148,7 @@ export const CreateEditListingView: React.FC = () => {
       } else {
         await createListing(listingPayload as any);
         setSubmitSuccess(
-          userProfile?.role === 'teacher' || userProfile?.role === 'admin'
-            ? 'Product published successfully and now visible in the store!'
-            : 'Listing submitted to Firestore! Awaiting teacher safety clearance.'
+          'Product published successfully and now visible in the store!'
         );
       }
 
@@ -467,9 +470,9 @@ export const CreateEditListingView: React.FC = () => {
         {/* Submit Buttons */}
         <div className="pt-4 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="text-[11px] text-slate-500 font-mono">
-            {userProfile?.role === 'teacher' || userProfile?.role === 'admin'
-              ? 'Published immediately by Lab Supervisor'
-              : 'Will be queued for Teacher Approval before going public'}
+            {canPublishModel
+              ? 'Approved staff listing: publishes immediately'
+              : 'Class Students approval is required to publish'}
           </div>
 
           <div className="flex items-center gap-2 w-full sm:w-auto">

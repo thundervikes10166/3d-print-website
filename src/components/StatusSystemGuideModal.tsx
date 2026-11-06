@@ -1,60 +1,40 @@
 import React from 'react';
 import { useLab } from '../context/LabContext';
 import { X, CheckCircle2, Clock, PlayCircle, PackageCheck, AlertCircle, FileText } from 'lucide-react';
-import { RequestStatus } from '../types';
 
 export const STATUS_DEFINITIONS: Record<
   string,
   { label: string; description: string; step: number; badgeColor: string }
 > = {
   submitted: {
-    label: 'Submitted / Requested',
-    description:
-      'The custom CAD ticket or catalog print request has been saved in Firestore and is queued for lab review.',
-    step: 1,
-    badgeColor: 'bg-red-50 text-red-800 border-red-200',
+    label: 'Submitted',
+    description: 'The customer has submitted a CAD quote request.',
+    step: 1, badgeColor: 'bg-red-50 text-red-800 border-red-200',
   },
-  underReview: {
-    label: 'Under Review',
-    description:
-      'A student maker or lab teacher is reviewing the 3D geometry in slicing software (Cura/PrusaSlicer) for safety and overhang tolerances.',
-    step: 2,
-    badgeColor: 'bg-amber-50 text-amber-800 border-amber-200',
+  received: {
+    label: 'Marked as received',
+    description: 'Our team has acknowledged and reviewed the incoming request.',
+    step: 2, badgeColor: 'bg-amber-50 text-amber-800 border-amber-200',
   },
-  accepted: {
-    label: 'Accepted',
-    description:
-      'The model has passed CAD inspection. Filament is reserved and the G-code is staged on the SD card / OctoPrint.',
-    step: 3,
-    badgeColor: 'bg-purple-50 text-purple-800 border-purple-200',
+  slicing: {
+    label: 'In progress (slicer)',
+    description: 'The team is preparing and slicing the file for print production.',
+    step: 3, badgeColor: 'bg-purple-50 text-purple-800 border-purple-200',
   },
-  inProduction: {
-    label: 'In Production',
-    description:
-      'The 3D printer is actively extruding the part on the heated build plate in Room Q10.',
-    step: 4,
-    badgeColor: 'bg-indigo-50 text-indigo-800 border-indigo-200',
+  printing: {
+    label: 'In printer / printing',
+    description: 'The print is loaded or printing on the machine.',
+    step: 4, badgeColor: 'bg-indigo-50 text-indigo-800 border-indigo-200',
   },
   ready: {
-    label: 'Ready for Pickup',
-    description:
-      'Print finished, cooled, and removed from the print bed. Placed on the Room Q10 fabrication shelf at Hueneme High.',
-    step: 5,
-    badgeColor: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+    label: 'Ready for pick up',
+    description: 'The object is finished and waiting for pickup.',
+    step: 5, badgeColor: 'bg-emerald-50 text-emerald-800 border-emerald-200',
   },
   completed: {
-    label: 'Completed',
-    description:
-      'The requester has picked up their 3D part and verified fitment for robotics/class use.',
-    step: 6,
-    badgeColor: 'bg-slate-50 text-slate-700 border-slate-200',
-  },
-  declined: {
-    label: 'Declined / Re-slice Required',
-    description:
-      'The model was declined due to unprintable geometry, non-school-safe design, or unavailable filament.',
-    step: 0,
-    badgeColor: 'bg-rose-50 text-rose-800 border-rose-200',
+    label: 'Complete',
+    description: 'The item was picked up and the request was moved to Completed.',
+    step: 6, badgeColor: 'bg-slate-50 text-slate-700 border-slate-200',
   },
 };
 
@@ -67,24 +47,22 @@ export const StatusSystemGuideModal: React.FC = () => {
     switch (statusKey) {
       case 'submitted':
         return <FileText className="w-4 h-4 text-red-600" />;
-      case 'underReview':
+      case 'received':
         return <Clock className="w-4 h-4 text-amber-600" />;
-      case 'accepted':
+      case 'slicing':
         return <CheckCircle2 className="w-4 h-4 text-purple-600" />;
-      case 'inProduction':
+      case 'printing':
         return <PlayCircle className="w-4 h-4 text-indigo-600" />;
       case 'ready':
         return <PackageCheck className="w-4 h-4 text-emerald-600" />;
       case 'completed':
         return <CheckCircle2 className="w-4 h-4 text-slate-500" />;
-      case 'declined':
-        return <AlertCircle className="w-4 h-4 text-rose-600" />;
       default:
         return <FileText className="w-4 h-4 text-slate-500" />;
     }
   };
 
-  const statusSteps = ['submitted', 'underReview', 'accepted', 'inProduction', 'ready', 'completed'];
+  const statusSteps = ['submitted', 'received', 'slicing', 'printing', 'ready', 'completed'];
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
@@ -92,9 +70,9 @@ export const StatusSystemGuideModal: React.FC = () => {
         {/* Header */}
         <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
           <div>
-            <h3 className="text-base font-extrabold uppercase tracking-tight">3D Print Request & Order Lifecycle</h3>
+            <h3 className="text-base font-extrabold uppercase tracking-tight">CAD Request Lifecycle</h3>
             <p className="text-xs text-slate-300 font-normal">
-              Standard operating procedure for school robotics & coding print lab requests
+              Six stages for CAD quote requests; catalog orders use a separate status flow
             </p>
           </div>
           <button
@@ -154,7 +132,7 @@ export const StatusSystemGuideModal: React.FC = () => {
 
           {/* Lab note */}
           <div className="p-3.5 bg-blue-50/70 border border-blue-200 rounded text-xs text-slate-900 leading-relaxed font-normal">
-            <strong className="font-bold uppercase font-mono text-[11px]">Classroom Quality & Safety Check:</strong> All models are reviewed by the student maker and teacher for structural integrity, bed adhesion safety, and appropriate non-hazardous geometry before printing commences in Room 204.
+            <strong className="font-bold uppercase font-mono text-[11px]">Classroom Quality & Safety Check:</strong> All models are reviewed by the student maker and teacher for structural integrity, bed adhesion safety, and appropriate non-hazardous geometry before printing begins in Room Q10.
           </div>
         </div>
 

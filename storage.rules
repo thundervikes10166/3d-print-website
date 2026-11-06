@@ -1,0 +1,18 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Images for CAD quote requests: users may upload into their own folder only.
+    match /cad-request-images/{userId}/{fileName} {
+      allow get: if request.auth != null && request.auth.uid == userId;
+      allow list: if false;
+      allow create: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.size > 0
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp)');
+      // Used to clean up an uploaded image when submitting the Firestore request fails.
+      allow delete: if request.auth != null && request.auth.uid == userId;
+      allow update: if false;
+    }
+  }
+}

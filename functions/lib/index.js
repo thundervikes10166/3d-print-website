@@ -14,8 +14,8 @@ const db = (0, firestore_1.getFirestore)();
 const resendApiKey = (0, params_1.defineSecret)('RESEND_API_KEY');
 const notificationFromEmail = (0, params_1.defineString)('NOTIFICATION_FROM_EMAIL');
 const baselineAdminEmails = [
-    'ckojwang1@oxnardunion.org',
-    'kojwangpeter2@gmail.com',
+    'jonathan.soto@oxnardunion.org',
+    'thundervikes10166@gmail.com',
 ];
 const escapeHtml = (value) => String(value ?? '')
     .replace(/&/g, '&amp;')

@@ -52,8 +52,9 @@ export const MarketplaceView: React.FC = () => {
 
   // Derived category list
   const categoryNames = useMemo(() => {
-    const base = ['All', 'Robotics', 'Desk Accessories', 'Tools', 'Games', 'Decorations', 'Other'];
-    const dynamic = categories.map((c) => c.name);
+    const base = ['All', 'Robotics', 'Desk Accessories', 'Toys', 'Woodwork', 'Games', 'Decorations', 'Other'];
+    // Hide the retired Tools category even if it remains in existing Firestore category records.
+    const dynamic = categories.map((c) => c.name).filter((name) => name.trim().toLowerCase() !== 'tools');
     return Array.from(new Set([...base, ...dynamic]));
   }, [categories]);
 

@@ -24,6 +24,7 @@ export const Navbar: React.FC = () => {
     userProfile,
     classStudents,
     isAdminWhitelisted,
+    canManageStore,
     logout,
     setShowAuthModal,
     setAuthModalMode,
@@ -44,7 +45,7 @@ export const Navbar: React.FC = () => {
         (student) => student.email?.trim().toLowerCase() === currentUser.email?.trim().toLowerCase()
       )
   );
-  const roleLabel = isAdminWhitelisted ? 'Admin' : isClassStudent ? 'Student' : 'Buyer';
+  const roleLabel = isAdminWhitelisted ? 'Admin' : canManageStore ? 'Class Student Staff' : 'Buyer';
 
   return (
     <nav className="sticky top-0 z-40 bg-slate-900 border-b border-slate-800 text-white shadow-md">
@@ -126,7 +127,7 @@ export const Navbar: React.FC = () => {
                   : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
               }`}
             >
-              Admin
+              Manage
             </button>
           </div>
 
@@ -253,7 +254,7 @@ export const Navbar: React.FC = () => {
               onClick={() => handleNav('teacher_dashboard')}
               className="text-left px-3 py-2 rounded text-xs font-mono font-bold uppercase text-red-400 hover:bg-slate-900"
             >
-              Admin
+              Manage
             </button>
           </div>
 

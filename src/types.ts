@@ -3,13 +3,17 @@ export type Category =
   | 'Robotics'
   | 'Decorations'
   | 'Games'
-  | 'Tools'
+  | 'Toys'
+  | 'Woodwork'
   | 'Other';
 
 export type MaterialType = 'PLA' | 'PLA+' | 'PETG' | 'TPU' | 'ABS' | 'Resin';
 
 export type RequestStatus = 
   | 'submitted'
+  | 'received'
+  | 'slicing'
+  | 'printing'
   | 'underReview'
   | 'accepted'
   | 'inProduction'
@@ -24,6 +28,9 @@ export type ListingStatus =
   | 'rejected';
 
 export type OrderStatus = 
+  | 'received'
+  | 'slicing'
+  | 'printing'
   | 'requested'
   | 'underReview'
   | 'accepted'
@@ -34,7 +41,7 @@ export type OrderStatus =
 
 export type PriceType = 'fixed' | 'quote';
 
-export type UserRole = 'student' | 'teacher' | 'admin';
+export type UserRole = 'student' | 'teacher' | 'teacher_admin' | 'admin';
 
 export type PreferredUpdateMethod = 'email' | 'phone';
 
@@ -50,9 +57,31 @@ export interface ClassStudent {
   studentId?: string;
   period?: string;
   canPublish: boolean;
+  approved?: boolean;
+  uid?: string;
+  approvedAt?: string;
+  approvedBy?: string;
   notes?: string;
   addedAt: any;
   addedBy?: string;
+}
+
+export interface ClassStudentApplication {
+  id: string;
+  uid: string;
+  email: string;
+  name: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt?: any;
+  reviewedAt?: any;
+  reviewedBy?: string;
+}
+
+export interface DetailEditEvent {
+  timestamp: string;
+  changedByUid: string;
+  changedByName: string;
+  fields: string[];
 }
 
 export interface UserProfile {
@@ -118,13 +147,16 @@ export interface CustomRequest {
   updatesActivated?: boolean;
   description: string;
   itemTitle: string;
-  category: string;
-  referenceImageUrl?: string;
+  category?: string; // Historical requests may have a category; new requests do not.
+  referenceImageUrl?: string; // Legacy URL or uploaded Firebase Storage photo URL
+  referenceImageStoragePath?: string; // Storage path for newly uploaded images
+  referenceFileUrl?: string; // Link to STL file or reference photo
   desiredSize?: string;
   desiredDimensions?: string;
   material: MaterialType | string;
   preferredMaterial?: MaterialType | string;
   color: string;
+  colorMode?: 'solid' | 'multicolor';
   preferredColor?: string;
   quantity: number;
   neededByDate: string;
@@ -138,13 +170,28 @@ export interface CustomRequest {
   depositPaid?: boolean;
   depositAmount?: number;
   depositTransactionId?: string;
+  // Append-only-by-UI stage events; old records may lack author metadata.
+  editLog?: DetailEditEvent[];
   statusLog?: {
     status: RequestStatus;
-    timestamp: string;
+    timestamp: string; // ISO 8601 for new events; old records may use display strings
     note: string;
+    changedByUid?: string;
+    changedByName?: string;
+    changedByEmail?: string;
   }[];
   createdAt: any;
   updatedAt?: any;
+}
+
+export interface RequestStaffNote {
+  id: string;
+  text: string;
+  timestamp: string;
+  createdAt?: any;
+  authorUid: string;
+  authorName: string;
+  authorEmail?: string;
 }
 
 export interface Order {
@@ -174,10 +221,14 @@ export interface Order {
   depositTransactionId?: string;
   depositPaidAt?: any;
   status: OrderStatus;
+  editLog?: DetailEditEvent[];
   statusLog?: {
     status: OrderStatus;
     timestamp: string;
     note: string;
+    changedByUid?: string;
+    changedByName?: string;
+    changedByEmail?: string;
   }[];
   createdAt: any;
   updatedAt?: any;
