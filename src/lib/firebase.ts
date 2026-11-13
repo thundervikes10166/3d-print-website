@@ -21,7 +21,16 @@ export const isFirebaseConfigured = [
   firebaseConfig.appId,
 ].every((value) => value.trim() !== '');
 
-export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+// If the VITE_FIREBASE_* variables were missing at build time, Firebase Auth
+// throws "auth/invalid-api-key" while the page loads and the whole site goes
+// blank. Initialize with harmless placeholders instead so the app still renders
+// and <FirebaseConfigBanner> can explain the problem. LabContext skips every
+// Firestore/Auth listener while isFirebaseConfigured is false.
+const safeConfig = isFirebaseConfigured
+  ? firebaseConfig
+  : { ...firebaseConfig, apiKey: 'missing-firebase-config', projectId: 'missing-firebase-config', appId: 'missing-firebase-config' };
+
+export const app = getApps().length > 0 ? getApp() : initializeApp(safeConfig);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });

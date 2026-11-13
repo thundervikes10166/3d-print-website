@@ -21,7 +21,10 @@ service cloud.firestore {
     function operator() { return isAdmin() || isTeacher() || approvedStudent(); }
 
     match /users/{userId} {
-      allow read: if signedIn();
+      // Users read only their own profile; admins can look up any account
+      // (needed for adding class students by email). Keeps emails private.
+      allow get: if isAdmin() || (signedIn() && request.auth.uid == userId);
+      allow list: if isAdmin();
       allow create: if signedIn() && request.auth.uid == userId &&
         request.resource.data.uid == userId &&
         request.resource.data.role == 'student' &&

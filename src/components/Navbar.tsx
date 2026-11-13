@@ -22,7 +22,6 @@ export const Navbar: React.FC = () => {
     navigateTo,
     currentUser,
     userProfile,
-    classStudents,
     isAdminWhitelisted,
     canManageStore,
     logout,
@@ -39,12 +38,6 @@ export const Navbar: React.FC = () => {
     setMobileMenuOpen(false);
   };
 
-  const isClassStudent = Boolean(
-    currentUser?.email &&
-      classStudents.some(
-        (student) => student.email?.trim().toLowerCase() === currentUser.email?.trim().toLowerCase()
-      )
-  );
   const roleLabel = isAdminWhitelisted ? 'Admin' : canManageStore ? 'Class Student Staff' : 'Buyer';
 
   return (

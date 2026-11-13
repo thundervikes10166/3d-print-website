@@ -1,26 +1,49 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Thunder Vikes 3D Print Store
 
-# Run and deploy your AI Studio app
+Online store and custom-print request portal for the Hueneme High School Robotics & Coding Lab (Room Q10).
 
-This contains everything you need to run your app locally.
+**Stack:** React 19 + Vite 6 + Tailwind 4 · Firebase Auth + Firestore (+ Storage for CAD photos) · Netlify hosting + Netlify Functions.
 
-View your app in AI Studio: https://ai.studio/apps/e2e79769-a7a2-4a12-86e8-fd8bcf718a56
+## Project layout
 
-## Run Locally
+| Path | Purpose |
+|---|---|
+| `src/App.tsx` | Picks which view to show from `activeView` (no URL router). |
+| `src/context/LabContext.tsx` | All auth, roles, live Firestore data, and database writes. |
+| `src/components/` | One file per screen/panel (Shop, Merch, Request, Workbench, Manage...). |
+| `src/lib/` | Firebase setup, workflow stages, merch categories, image upload. |
+| `netlify/functions/` | Server code: guest shop estimates and admin invitations. |
+| `firestore.rules`, `storage.rules` | Database / file security rules. |
+| `functions/` | Optional Firebase Cloud Functions (email alerts; needs Blaze plan). |
 
-**Prerequisites:**  Node.js
+## What deploys where
 
+| Change | How it goes live |
+|---|---|
+| Anything in `src/`, `public/`, `netlify/`, `netlify.toml`, `package.json` | `git push` to `main` → Netlify builds automatically. |
+| `firestore.rules` | **Not deployed by Netlify.** Paste into Firebase Console → Firestore → Rules → Publish. |
+| `storage.rules` | **Not deployed by Netlify.** Firebase Console → Storage → Rules → Publish. |
+| `functions/` | Only via `firebase deploy --only functions` (Blaze plan). |
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## Netlify environment variables
 
-## Admin email notifications
+| Variable | Scope | Used by |
+|---|---|---|
+| `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, `VITE_FIREBASE_APP_ID` | **Builds** | Website (baked in at build time) |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | Functions (secret) | Netlify Functions |
+| `RESEND_API_KEY`, `NOTIFICATION_FROM_EMAIL` | Functions (secret) | Admin emails |
 
-New marketplace orders and custom CAD requests are emailed to every authorized admin by a Firebase Firestore trigger. The website still stores and displays each record normally.
+Changing a variable requires a new deploy (Deploys → Trigger deploy).
 
-To enable email delivery, see [functions/README.md](functions/README.md). You will need a verified Resend sender address, a `RESEND_API_KEY` Firebase secret, and a Firebase project with Cloud Functions enabled. The triggers are not active until the `functions` package is deployed with `npm run deploy`.
+## Working in Codespaces
+
+```bash
+npm install
+npm run lint     # type check
+npm run build    # must pass before pushing
+git add -A && git commit -m "Describe change" && git push origin main
+```
+
+`npm run dev` does not run Netlify Functions (guest estimates, admin invites). Test those on the deployed site or with `npx netlify dev`.
+
+**Applying a ZIP update:** upload it to the repo root (next to `package.json`) and run `unzip -o file.zip`. Then check `git status`: changed files must show as `src/...`, not inside a new folder.

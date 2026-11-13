@@ -3,6 +3,10 @@
   publish = "dist"
   functions = "netlify/functions"
 
+# Pin Node so Netlify builds match Codespaces and local builds.
+[build.environment]
+  NODE_VERSION = "22"
+
 # Existing React/Vite single-page routing.
 [[redirects]]
   from = "/*"
