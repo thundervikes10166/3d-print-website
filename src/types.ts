@@ -102,6 +102,12 @@ export interface UserProfile {
   createdAt?: any;
 }
 
+export interface ListingSizeOption {
+  label: string; // Visible choice, e.g. "Small" or "6 inch"
+  dimensions: string; // Physical size, e.g. "6 x 6 x 3 in"
+  price?: number; // Optional material fee for this specific size
+}
+
 export interface ListingSpecs {
   dimensions: string; // e.g. "85 x 45 x 20 mm"
   layerHeight: string; // e.g. "0.20 mm standard"
@@ -128,6 +134,9 @@ export interface Listing {
   material: string;
   availableOptions?: string[];
   merchSizes?: string[]; // Apparel sizes available in the Merch tab
+  sizeOptions?: ListingSizeOption[]; // Optional print/woodwork sizes, dimensions and price variants
+  stockQuantity?: number | null; // null/absent = made to order; 0 = out of stock
+  orderInstructions?: string; // Optional information shown to customer before inquiry
   estimatedProductionTime: string; // e.g. "2-3 days"
   imageUrl: string;
   secondaryImageUrl?: string;
@@ -220,6 +229,7 @@ export interface Order {
   priceAtTimeOfOrder: number;
   selectedColor?: string;
   selectedSize?: string;
+  selectedOption?: string;
   selectedMaterial?: string;
   notes?: string;
   pickupLocation?: string;

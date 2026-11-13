@@ -40,9 +40,10 @@ export const ProductPageView: React.FC = () => {
   const [preferredUpdateMethod, setPreferredUpdateMethod] = useState<PreferredUpdateMethod | ''>('');
 
   // Inquiry options
-  const [selectedColor, setSelectedColor] = useState<string>(product?.specs?.availableColors?.[0] || 'Signal Red');
+  const [selectedColor, setSelectedColor] = useState<string>(product?.specs?.availableColors?.[0] || 'Standard');
   const [quantity, setQuantity] = useState<number>(1);
   const [selectedSize, setSelectedSize] = useState('');
+  const [selectedOption, setSelectedOption] = useState('');
   const [orderNotes, setOrderNotes] = useState<string>('');
   // Honeypot: bots may fill this field, normal visitors never see it.
   const [website, setWebsite] = useState('');
@@ -71,6 +72,11 @@ export const ProductPageView: React.FC = () => {
   }
 
   const title = product.title || product.name || 'Product';
+  const stock = typeof product.stockQuantity === 'number' ? product.stockQuantity : null;
+  const outOfStock = stock === 0;
+  const maxQuantity = stock === null ? 15 : Math.min(15, stock);
+  const itemSizes = !isMerch ? product.sizeOptions || [] : [];
+  const selectedVariant = itemSizes.find(x => x.label === selectedSize);
   const makerName = product.creatorDisplayName || product.makerName || 'Student Maker';
 
   const handleRequestQuote = async (e: React.FormEvent) => {
@@ -97,8 +103,16 @@ export const ProductPageView: React.FC = () => {
       return;
     }
 
-    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 15) {
-      setFormError('Please choose a quantity between 1 and 15.');
+    if (!isMerch && itemSizes.length && !itemSizes.some(x => x.label === selectedSize)) {
+      setFormError('Please choose an available print or woodwork size.');
+      return;
+    }
+    if (product.availableOptions?.length && !product.availableOptions.includes(selectedOption)) {
+      setFormError('Please choose an available item option.');
+      return;
+    }
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > maxQuantity) {
+      setFormError(outOfStock ? 'This item is out of stock.' : `Please choose a quantity between 1 and ${maxQuantity}.`);
       return;
     }
 
@@ -138,7 +152,8 @@ export const ProductPageView: React.FC = () => {
           contactPhone: contactPhone.trim(),
           preferredUpdateMethod,
           selectedColor,
-          selectedSize: isMerch ? selectedSize : '',
+          selectedSize,
+          selectedOption,
           quantity,
           notes: orderNotes.trim(),
           website,
@@ -157,7 +172,7 @@ export const ProductPageView: React.FC = () => {
     }
   };
 
-  const colors = product.specs?.availableColors || ['Signal Red', 'Stealth Black', 'White'];
+  const colors = product.specs?.availableColors?.length ? product.specs.availableColors : ['Standard'];
 
   return (
     <div className="max-w-5xl mx-auto space-y-6 pb-20">
@@ -192,6 +207,10 @@ export const ProductPageView: React.FC = () => {
                 }}
               />
             </div>
+            {product.secondaryImageUrl && <div className="border-t border-slate-200 p-3 bg-slate-50">
+              <p className="text-xs font-semibold text-slate-500 mb-2">Additional product photo</p>
+              <img src={product.secondaryImageUrl} alt={`${title} alternate view`} className="max-h-40 rounded border object-contain" />
+            </div>}
 
             <div className="p-5 space-y-3">
               <div className="flex items-center justify-between">
@@ -203,13 +222,16 @@ export const ProductPageView: React.FC = () => {
                 </span>
               </div>
 
+              {stock !== null && <p role="status" className="text-sm font-extrabold text-red-600">
+                {outOfStock ? 'Out of stock' : `${stock} left in stock`}
+              </p>}
               <h1 className="text-xl font-extrabold uppercase tracking-tight text-slate-900">
                 {title}
               </h1>
 
-              <p className="text-xs text-slate-600 leading-relaxed">
-                {product.description}
-              </p>
+              <p className="text-xs text-slate-600 leading-relaxed">{product.description}</p>
+              {product.orderInstructions && <p className="rounded bg-sky-50 border border-sky-200 p-3 text-xs text-slate-700"><strong>Item notes:</strong> {product.orderInstructions}</p>}
+              {selectedVariant && <p className="text-xs text-slate-700">Selected size: {selectedVariant.dimensions}</p>}
             </div>
           </div>
 
@@ -264,6 +286,8 @@ export const ProductPageView: React.FC = () => {
                   Continue Browsing
                 </button>
               </div>
+            ) : outOfStock ? (
+              <p className="rounded border border-red-200 bg-red-50 p-4 text-sm text-red-800">This item is currently out of stock. Please check back later or contact the team at thundervikes10166@gmail.com.</p>
             ) : (
               <form onSubmit={handleRequestQuote} className="space-y-4">
                 
@@ -408,11 +432,18 @@ export const ProductPageView: React.FC = () => {
                       </select>
                     </div>
 
-                    {isMerch && !!product.merchSizes?.length && <div>
-                      <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">Size *</label>
+                    {(isMerch ? !!product.merchSizes?.length : !!itemSizes.length) && <div>
+                      <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">{isMerch ? "Clothing Size *" : "Product Size *"}</label>
                       <select required value={selectedSize} onChange={e => setSelectedSize(e.target.value)} className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded focus:bg-white focus:border-[#C41E3A] outline-hidden">
                         <option value="">Select a size</option>
-                        {product.merchSizes.map(size=><option key={size} value={size}>{size}</option>)}
+                        {isMerch ? product.merchSizes?.map(size=><option key={size} value={size}>{size}</option>) : itemSizes.map(size=><option key={size.label} value={size.label}>{size.label} — {size.dimensions}{typeof size.price === 'number' && product.priceType === 'fixed' ? ` ($${size.price.toFixed(2)})` : ''}</option>)}
+                      </select>
+                    </div>}
+                    {!!product.availableOptions?.length && <div>
+                      <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">Other item option *</label>
+                      <select required className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded" value={selectedOption} onChange={e=>setSelectedOption(e.target.value)}>
+                        <option value="">Select an option</option>
+                        {product.availableOptions.map(option=><option key={option} value={option}>{option}</option>)}
                       </select>
                     </div>}
                     <div>
@@ -422,7 +453,7 @@ export const ProductPageView: React.FC = () => {
                       <input
                         type="number"
                         min={1}
-                        max={15}
+                        max={maxQuantity}
                         required
                         value={quantity}
                         onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}

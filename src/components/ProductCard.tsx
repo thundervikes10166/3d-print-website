@@ -12,6 +12,8 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
 
   const title = product.title || product.name || 'Product';
   const isMerch = isMerchListing(product);
+  const stock = typeof product.stockQuantity === 'number' ? product.stockQuantity : null;
+  const soldOut = stock === 0;
   const priceDisplay =
     product.priceType === 'quote'
       ? 'Custom Quote'
@@ -43,6 +45,9 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
             {title}
           </h3>
 
+          {stock !== null && <p className="text-xs font-extrabold text-red-600" role="status">
+            {soldOut ? 'Out of stock' : `${stock} left in stock`}
+          </p>}
           {/* 3. Material & 4. Estimated Delivery */}
           <div className="flex items-center justify-between text-xs font-mono">
             <span className="font-bold text-[#C41E3A] bg-red-50 px-2 py-0.5 rounded border border-red-100">
@@ -73,7 +78,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
             }}
             className="px-3 py-1.5 bg-[#C41E3A] hover:bg-[#A0182E] text-white text-xs font-bold uppercase tracking-wider rounded transition-colors shadow-xs"
           >
-            Request Quote
+            {soldOut ? "View Item" : "Request Quote"}
           </button>
         </div>
       </div>

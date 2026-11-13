@@ -55,6 +55,7 @@ async function notifyAdmin(db, orderId, order) {
     `Quantity: ${order.quantity}`,
     `Color: ${order.selectedColor}`,
     `Size: ${order.selectedSize || '(not applicable)'}`,
+    `Other option: ${order.selectedOption || '(not applicable)'}`,
     `Material: ${order.selectedMaterial}`,
     `Notes: ${order.notes || '(none)'}`,
     '',
@@ -96,7 +97,8 @@ exports.handler = async (event) => {
   const contactPhone = str(data.contactPhone, 30);
   const preferredUpdateMethod = str(data.preferredUpdateMethod, 10);
   const selectedColor = str(data.selectedColor, 80);
-  const selectedSize = str(data.selectedSize, 40);
+  const selectedSize = str(data.selectedSize, 80);
+  const selectedOption = str(data.selectedOption, 120);
   const notes = str(data.notes, 1500);
   const quantity = data.quantity;
 
@@ -127,11 +129,19 @@ exports.handler = async (event) => {
     const listing = listingSnap.data();
     const allowedColors = listing.specs?.availableColors;
     const colors = Array.isArray(allowedColors) && allowedColors.length
-      ? allowedColors : ['Signal Red', 'Stealth Black', 'White'];
+      ? allowedColors : ['Standard'];
     if (!colors.includes(selectedColor)) return reply(400, { error: 'Please select a valid color.' });
     const merchCategory = ['t-shirts', 'hats', 'hoodies', 'other merch', 'merch'].includes(String(listing.category || '').trim().toLowerCase());
     const sizes = Array.isArray(listing.merchSizes) ? listing.merchSizes : [];
     if (merchCategory && sizes.length && !sizes.includes(selectedSize)) return reply(400, { error: 'Please select an available size.' });
+    const sizeOptions = !merchCategory && Array.isArray(listing.sizeOptions) ? listing.sizeOptions : [];
+    const selectedVariant = sizeOptions.find(size => size && size.label === selectedSize);
+    if (sizeOptions.length && !selectedVariant) return reply(400, { error: 'Please choose an available product size.' });
+    const availableOptions = Array.isArray(listing.availableOptions) ? listing.availableOptions : [];
+    if (availableOptions.length && !availableOptions.includes(selectedOption)) return reply(400, { error: 'Please select a valid item option.' });
+    if (typeof listing.stockQuantity === 'number' && Number.isInteger(listing.stockQuantity) && (listing.stockQuantity < 1 || quantity > listing.stockQuantity)) {
+      return reply(409, { error: 'Not enough stock is currently available. Please choose a smaller quantity or contact the team.' });
+    }
 
     // Per-IP throttle. The token is HMAC-hashed; raw IPs are never written to Firestore.
     // Netlify's own rate-limiting should also be enabled for stronger protection.
@@ -158,9 +168,11 @@ exports.handler = async (event) => {
       listingTitle: listing.title || listing.name || '3D printed item',
       listingImageUrl: listing.imageUrl || '',
       quantity,
-      priceAtTimeOfOrder: Number(listing.price || listing.priceAmount || 0),
+      priceAtTimeOfOrder: listing.priceType === 'fixed' && selectedVariant && typeof selectedVariant.price === 'number'
+        ? selectedVariant.price : Number(listing.price || listing.priceAmount || 0),
       selectedColor,
-      selectedSize: merchCategory ? selectedSize : '',
+      selectedSize,
+      selectedOption,
       selectedMaterial: listing.material || 'PLA',
       notes,
       isQuoteRequest: true,
