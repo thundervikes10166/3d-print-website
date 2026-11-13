@@ -1,12 +1,12 @@
 import React, {useMemo,useState} from 'react';
-import { Check, X, Trash2, Plus, ChevronDown, ShieldCheck, ShoppingBag, FileText, Users, Package, FolderPlus, DollarSign } from 'lucide-react';
+import { Check, X, Trash2, Plus, ChevronDown, ShieldCheck, ShoppingBag, FileText, Users, Package, FolderPlus } from 'lucide-react';
 import {useLab} from '../context/LabContext';
 import {OrderManagementCard} from './OrderManagementCard';
 import {RequestManagementCard} from './RequestManagementCard';
 import {displayRequestDateTime} from '../lib/requestWorkflow';
 import {BASELINE_ADMIN_WHITELIST} from '../types';
 
-type Panel='orders'|'requests'|'catalog'|'categories'|'financials'|'class_students'|'admin_accounts';
+type Panel='orders'|'requests'|'catalog'|'categories'|'class_students'|'admin_accounts';
 const primary='bg-[#C41E3A] hover:bg-red-800 text-white';
 const secondary='bg-white hover:bg-slate-100 text-slate-800 border border-slate-300';
 
@@ -15,7 +15,7 @@ export const TeacherAdminDashboardView:React.FC=()=>{
   const {currentUser,isAdminWhitelisted,canManageStore,canManageAccounts,setShowAuthModal,
     listings,orders,requests,categories,classStudents,studentApplications,adminWhitelist,
     navigateTo,approveListing,deleteListing,updateRequestStatus,updateRequestDetails,addRequestNote,
-    updateOrderStatus,updateOrderDetails,confirmCashDeposit,addCategory,deleteCategory,
+    updateOrderStatus,updateOrderDetails,addCategory,deleteCategory,
     approveStudentApplication,rejectStudentApplication,addClassStudent,removeClassStudent,
     updateClassStudent,addAdminEmail,removeAdminEmail}=lab;
   const [tab,setTab]=useState<Panel>('orders');
@@ -31,7 +31,7 @@ export const TeacherAdminDashboardView:React.FC=()=>{
   const [adminEmail,setAdminEmail]=useState('');
   const [studentSearch,setStudentSearch]=useState('');
   const pendingStudents=studentApplications.filter(a=>a.status==='pending');
-  const activeTab=(canManageAccounts || !['financials','class_students','admin_accounts'].includes(tab))?tab:'orders';
+  const activeTab=(canManageAccounts || !['class_students','admin_accounts'].includes(tab))?tab:'orders';
   const visibleOrders=useMemo(()=>orders.filter(o=>orderQueue==='completed'?o.status==='completed':o.status!=='completed'),[orders,orderQueue]);
   const visibleRequests=useMemo(()=>requests.filter(r=>cadQueue==='completed'?r.status==='completed':r.status!=='completed'),[requests,cadQueue]);
   const filteredStudents=classStudents.filter(s=>[s.email,s.name,s.period].join(' ').toLowerCase().includes(studentSearch.toLowerCase()));
@@ -53,7 +53,6 @@ export const TeacherAdminDashboardView:React.FC=()=>{
     ['catalog','Catalog Management',<Package className="w-4 h-4"/>],
     ['categories','Categories',<FolderPlus className="w-4 h-4"/>],
     ...(canManageAccounts?[
-      ['financials','Deposits & Refunds',<DollarSign className="w-4 h-4"/>],
       ['class_students',`Class Students${pendingStudents.length?` (${pendingStudents.length})`:''}`,<Users className="w-4 h-4"/>],
       ['admin_accounts','Admin Accounts',<ShieldCheck className="w-4 h-4"/>],
     ] as [Panel,string,React.ReactNode][]:[]),
@@ -100,9 +99,6 @@ export const TeacherAdminDashboardView:React.FC=()=>{
     </section>}
     {activeTab==='categories'&&<section className="bg-white border border-slate-200 rounded p-5 space-y-4"><h2 className="text-base font-extrabold">Product Categories</h2><form onSubmit={e=>{e.preventDefault();if(newCategory.trim())guarded(()=>addCategory(newCategory.trim()),'Category saved.').then(()=>setNewCategory(''));}} className="flex gap-2"><input value={newCategory} onChange={e=>setNewCategory(e.target.value)} required className="min-w-0 flex-1 border rounded p-2 text-sm" placeholder="Category name"/><button className={`${primary} rounded px-3 text-xs font-bold`} disabled={busy}>Add</button></form>
       {categories.map(c=><div key={c.id} className="border-b border-slate-100 py-2 flex items-center justify-between text-sm">{c.name}<button className="text-red-700" onClick={()=>{if(window.confirm(`Delete ${c.name}?`))guarded(()=>deleteCategory(c.id),'Category removed.');}}><Trash2 className="w-4 h-4"/></button></div>)}
-    </section>}
-    {activeTab==='financials'&&canManageAccounts&&<section className="bg-white border border-slate-200 rounded p-5 space-y-4"><h2 className="text-base font-extrabold">Deposits & Refunds</h2><p className="text-xs text-slate-600">Cash confirmation is limited to administrators. Refunds are handled manually by the teacher.</p>
-      {orders.filter(o=>!o.depositPaid).length===0?<p className="text-xs text-slate-500">No unconfirmed deposits.</p>:orders.filter(o=>!o.depositPaid).map(o=><div className="flex flex-wrap gap-2 justify-between border-b py-2 items-center text-xs" key={o.id}><span>{o.listingTitle} · {o.buyerDisplayName} · ${(o.depositAmount||2.5).toFixed(2)} suggested deposit</span><button className={`${secondary} rounded px-3 py-2 font-bold`} disabled={busy} onClick={()=>{if(window.confirm(`Confirm cash received for ${o.listingTitle}?`))guarded(()=>confirmCashDeposit(o.id,o.depositAmount||2.5),'Cash deposit recorded.');}}>Confirm cash received</button></div>)}
     </section>}
     {activeTab==='class_students'&&canManageAccounts&&<section className="space-y-5">
       <div className="bg-white border border-slate-200 rounded p-5 space-y-3"><h2 className="text-base font-extrabold">Registration Approvals ({pendingStudents.length})</h2><p className="text-xs text-slate-600">Every new registered customer appears here as pending. Approve with ✓ to give a student shop-management privileges, or deny with ✕. Denied accounts can still shop as customers.</p>

@@ -5,6 +5,10 @@ export type Category =
   | 'Games'
   | 'Toys'
   | 'Woodwork'
+  | 'T-Shirts'
+  | 'Hats'
+  | 'Hoodies'
+  | 'Other Merch'
   | 'Other';
 
 export type MaterialType = 'PLA' | 'PLA+' | 'PETG' | 'TPU' | 'ABS' | 'Resin';
@@ -123,6 +127,7 @@ export interface Listing {
   priceType?: PriceType;
   material: string;
   availableOptions?: string[];
+  merchSizes?: string[]; // Apparel sizes available in the Merch tab
   estimatedProductionTime: string; // e.g. "2-3 days"
   imageUrl: string;
   secondaryImageUrl?: string;
@@ -149,7 +154,8 @@ export interface CustomRequest {
   itemTitle: string;
   category?: string; // Historical requests may have a category; new requests do not.
   referenceImageUrl?: string; // Legacy URL or uploaded Firebase Storage photo URL
-  referenceImageStoragePath?: string; // Storage path for newly uploaded images
+  referenceImageStoragePath?: string; // Firebase Storage path or netlify-blobs:<private-key>
+  referenceImageContentType?: string; // MIME type for secured Netlify-hosted photo
   referenceFileUrl?: string; // Link to STL file or reference photo
   desiredSize?: string;
   desiredDimensions?: string;
@@ -167,6 +173,7 @@ export interface CustomRequest {
   assignedMakerName?: string;
   estimatedCost?: string;
   isQuoteRequest?: boolean;
+  guestCheckout?: boolean;
   depositPaid?: boolean;
   depositAmount?: number;
   depositTransactionId?: string;
@@ -212,10 +219,12 @@ export interface Order {
   quantity: number;
   priceAtTimeOfOrder: number;
   selectedColor?: string;
+  selectedSize?: string;
   selectedMaterial?: string;
   notes?: string;
   pickupLocation?: string;
   isQuoteRequest?: boolean;
+  guestCheckout?: boolean;
   depositPaid?: boolean;
   depositAmount?: number;
   depositTransactionId?: string;
@@ -252,6 +261,7 @@ export interface MaterialInventoryItem {
 
 export type ActiveView = 
   | 'marketplace'
+  | 'merch'
   | 'product_detail'
   | 'custom_request'
   | 'maker_profile'

@@ -1,6 +1,7 @@
 import React from 'react';
 import { useLab } from '../context/LabContext';
 import { Listing } from '../types';
+import { isMerchListing } from '../lib/listingKinds';
 
 interface ProductCardProps {
   product: Listing;
@@ -9,7 +10,8 @@ interface ProductCardProps {
 export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
   const { navigateTo } = useLab();
 
-  const title = product.title || product.name || 'Custom 3D Print';
+  const title = product.title || product.name || 'Product';
+  const isMerch = isMerchListing(product);
   const priceDisplay =
     product.priceType === 'quote'
       ? 'Custom Quote'
@@ -44,10 +46,10 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
           {/* 3. Material & 4. Estimated Delivery */}
           <div className="flex items-center justify-between text-xs font-mono">
             <span className="font-bold text-[#C41E3A] bg-red-50 px-2 py-0.5 rounded border border-red-100">
-              {product.material || 'PLA'}
+              {product.material || (isMerch ? 'Apparel' : 'Made to order')}
             </span>
             <span className="text-slate-600 font-medium">
-              {product.estimatedProductionTime || '2-3 Days'}
+              {product.estimatedProductionTime || (isMerch ? 'Confirm availability' : 'Made to order')}
             </span>
           </div>
 

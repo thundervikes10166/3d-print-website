@@ -870,7 +870,7 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateOrderDetails = async (orderId: string, updates: Partial<Order>): Promise<void> => {
     if (!currentUser || !canManageStore) throw new Error('Approved staff access required.');
-    const allowed = ['quantity','selectedColor','selectedMaterial','notes','pickupLocation','contactEmail','contactPhone'] as const;
+    const allowed = ['quantity','selectedColor','selectedSize','selectedMaterial','notes','pickupLocation','contactEmail','contactPhone'] as const;
     const cleanUpdates: Record<string, any> = {};
     allowed.forEach(key => { if (key in updates) cleanUpdates[key] = updates[key]; });
     if ('quantity' in cleanUpdates && (!Number.isInteger(cleanUpdates.quantity) || cleanUpdates.quantity < 1 || cleanUpdates.quantity > 1000)) {

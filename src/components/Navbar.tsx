@@ -69,66 +69,20 @@ export const Navbar: React.FC = () => {
             </button>
           </div>
 
-          {/* Desktop Nav Items */}
+          {/* Public shop sections plus account-specific staff links */}
           <div className="hidden md:flex items-center space-x-1">
-            <button
-              onClick={() => handleNav('marketplace')}
-              className={`px-3 py-2 rounded text-xs font-mono font-bold uppercase tracking-wider transition-colors ${
-                activeView === 'marketplace'
-                  ? 'bg-[#C41E3A] text-white'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-                Shop
-            </button>
-
-            <button
-              onClick={() => handleNav('custom_request')}
-              className={`px-3 py-2 rounded text-xs font-mono font-bold uppercase tracking-wider transition-colors ${
-                activeView === 'custom_request'
-                  ? 'bg-[#C41E3A] text-white'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-                Request
-            </button>
-
-            {currentUser && (
-              <>
-                <button
-                  onClick={() => handleNav('student_dashboard')}
-                  className={`px-3 py-2 rounded text-xs font-mono font-bold uppercase tracking-wider transition-colors ${
-                    activeView === 'student_dashboard'
-                      ? 'bg-[#C41E3A] text-white'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-                  }`}
-                >
-                  Workbench
-                </button>
-
-                <button
-                  onClick={() => handleNav('my_requests')}
-                  className={`px-3 py-2 rounded text-xs font-mono font-bold uppercase tracking-wider transition-colors ${
-                    activeView === 'my_requests'
-                      ? 'bg-[#C41E3A] text-white'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-                  }`}
-                >
-                  Orders
-                </button>
-              </>
-            )}
-
-            <button
-              onClick={() => handleNav('teacher_dashboard')}
-              className={`px-3 py-2 rounded text-xs font-mono font-bold uppercase tracking-wider transition-colors ${
-                activeView === 'teacher_dashboard'
-                  ? 'bg-[#C41E3A] text-white'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              Manage
-            </button>
+            {([
+              ['marketplace', 'Shop'],
+              ['custom_request', 'Request'],
+              ['merch', 'Merch'],
+            ] as const).map(([view, label]) => (
+              <button key={view} type="button" onClick={() => handleNav(view)} className={`px-3 py-2 rounded text-xs font-mono font-bold uppercase tracking-wider transition-colors ${activeView === view ? 'bg-[#C41E3A] text-white' : 'text-slate-300 hover:text-white hover:bg-slate-800/60'}`}>
+                {label}
+              </button>
+            ))}
+            {canManageStore && <button type="button" onClick={() => handleNav('student_dashboard')} className={`px-3 py-2 rounded text-xs font-mono font-bold uppercase tracking-wider transition-colors ${activeView === 'student_dashboard' ? 'bg-[#C41E3A] text-white' : 'text-slate-300 hover:text-white hover:bg-slate-800/60'}`}>Workbench</button>}
+            {currentUser && <button type="button" onClick={() => handleNav('my_requests')} className={`px-3 py-2 rounded text-xs font-mono font-bold uppercase tracking-wider transition-colors ${activeView === 'my_requests' ? 'bg-[#C41E3A] text-white' : 'text-slate-300 hover:text-white hover:bg-slate-800/60'}`}>Orders</button>}
+            {canManageStore && <button type="button" onClick={() => handleNav('teacher_dashboard')} className={`px-3 py-2 rounded text-xs font-mono font-bold uppercase tracking-wider transition-colors ${activeView === 'teacher_dashboard' ? 'bg-[#C41E3A] text-white' : 'text-slate-300 hover:text-white hover:bg-slate-800/60'}`}>Manage</button>}
           </div>
 
           {/* Right Action / Auth */}
@@ -222,40 +176,16 @@ export const Navbar: React.FC = () => {
       {mobileMenuOpen && (
         <div className="md:hidden bg-slate-950 border-b border-slate-800 px-4 pt-2 pb-6 space-y-3">
           <div className="flex flex-col space-y-1">
-            <button
-              onClick={() => handleNav('marketplace')}
-              className="text-left px-3 py-2 rounded text-xs font-mono font-bold uppercase text-slate-300 hover:text-white hover:bg-slate-900"
-            >
-              Marketplace
-            </button>
-            <button
-              onClick={() => handleNav('custom_request')}
-              className="text-left px-3 py-2 rounded text-xs font-mono font-bold uppercase text-slate-300 hover:text-white hover:bg-slate-900"
-            >
-              Request
-            </button>
-            {currentUser && (
-              <>
-                <button
-                  onClick={() => handleNav('student_dashboard')}
-                  className="text-left px-3 py-2 rounded text-xs font-mono font-bold uppercase text-slate-300 hover:text-white hover:bg-slate-900"
-                >
-                  Workbench
-                </button>
-                <button
-                  onClick={() => handleNav('my_requests')}
-                  className="text-left px-3 py-2 rounded text-xs font-mono font-bold uppercase text-slate-300 hover:text-white hover:bg-slate-900"
-                >
-                  Orders
-                </button>
-              </>
-            )}
-            <button
-              onClick={() => handleNav('teacher_dashboard')}
-              className="text-left px-3 py-2 rounded text-xs font-mono font-bold uppercase text-red-400 hover:bg-slate-900"
-            >
-              Manage
-            </button>
+            {([
+              ['marketplace', 'Shop'],
+              ['custom_request', 'Request'],
+              ['merch', 'Merch'],
+            ] as const).map(([view, label]) => (
+              <button key={view} onClick={() => handleNav(view)} className="text-left px-3 py-2 rounded text-xs font-mono font-bold uppercase text-slate-300 hover:text-white hover:bg-slate-900">{label}</button>
+            ))}
+            {canManageStore && <button onClick={() => handleNav('student_dashboard')} className="text-left px-3 py-2 rounded text-xs font-mono font-bold uppercase text-slate-300 hover:text-white hover:bg-slate-900">Workbench</button>}
+            {currentUser && <button onClick={() => handleNav('my_requests')} className="text-left px-3 py-2 rounded text-xs font-mono font-bold uppercase text-slate-300 hover:text-white hover:bg-slate-900">Orders</button>}
+            {canManageStore && <button onClick={() => handleNav('teacher_dashboard')} className="text-left px-3 py-2 rounded text-xs font-mono font-bold uppercase text-red-400 hover:bg-slate-900">Manage</button>}
           </div>
 
           <div className="pt-3 border-t border-slate-800">

@@ -86,7 +86,7 @@ service cloud.firestore {
         request.resource.data.quantity >= 1 && request.resource.data.quantity <= 1000;
       // Buyers may view their order but may not change production/payment state.
       allow update: if operator() && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-        'quantity','selectedColor','selectedMaterial','notes','pickupLocation',
+        'quantity','selectedColor','selectedSize','selectedMaterial','notes','pickupLocation',
         'contactEmail','contactPhone','status','statusLog','editLog','updatedAt',
         'depositPaid','depositAmount','depositTransactionId','depositPaidAt'
       ]) && (!request.resource.data.diff(resource.data).affectedKeys().hasAny([

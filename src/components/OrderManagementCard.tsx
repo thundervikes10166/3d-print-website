@@ -19,7 +19,7 @@ export const OrderManagementCard:React.FC<Props>=({order,processing,onChangeStag
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState<string|null>(null);
   const prev=previousOrderStatus(order.status);const next=nextOrderStatus(order.status);
-  useEffect(()=>{if(!editing)setDraft({quantity:order.quantity,selectedColor:order.selectedColor||'',selectedMaterial:order.selectedMaterial||'',notes:order.notes||'',pickupLocation:order.pickupLocation||'',contactEmail:order.contactEmail||'',contactPhone:order.contactPhone||''});},[order,editing]);
+  useEffect(()=>{if(!editing)setDraft({quantity:order.quantity,selectedColor:order.selectedColor||'',selectedSize:order.selectedSize||'',selectedMaterial:order.selectedMaterial||'',notes:order.notes||'',pickupLocation:order.pickupLocation||'',contactEmail:order.contactEmail||'',contactPhone:order.contactPhone||''});},[order,editing]);
   const move=async(status:OrderStatus)=>{setBusy(true);setError(null);try{await onChangeStage(order.id,status,note);setNote('');}catch(e:any){setError(e.message||'Could not move order.');}finally{setBusy(false);}};
   const save=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError(null);try{await onSaveDetails(order.id,draft);setEditing(false);}catch(e:any){setError(e.message||'Could not save order.');}finally{setBusy(false);}};
   return <article className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-xs">
@@ -37,14 +37,19 @@ export const OrderManagementCard:React.FC<Props>=({order,processing,onChangeStag
         <div><strong className="block text-[10px] text-slate-500 uppercase">Email / Phone</strong>{order.contactEmail||'No email'} · {order.contactPhone||'No phone'}</div>
         <div><strong className="block text-[10px] text-slate-500 uppercase">Qty / Material</strong>{order.quantity} × {order.selectedMaterial||'Standard'}</div>
         <div><strong className="block text-[10px] text-slate-500 uppercase">Color</strong>{order.selectedColor||'Standard'}</div>
-        <div><strong className="block text-[10px] text-slate-500 uppercase">Price / deposit</strong>{order.isQuoteRequest?'Estimate required':`$${(order.priceAtTimeOfOrder * order.quantity).toFixed(2)}`} · {order.depositPaid?'Paid':'Not recorded as paid'}</div>
+        {order.selectedSize && <div><strong className="block text-[10px] text-slate-500 uppercase">Size</strong>{order.selectedSize}</div>}
+        <div><strong className="block text-[10px] text-slate-500 uppercase">Quoted price</strong>{order.isQuoteRequest?'Estimate required':`$${(order.priceAtTimeOfOrder * order.quantity).toFixed(2)}`}</div>
         <div><strong className="block text-[10px] text-slate-500 uppercase">Pickup</strong>{order.pickupLocation||'Room Q10'}</div>
       </div>
+      {order.isQuoteRequest && <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+        <strong>Estimate / confirmation required:</strong> Contact this customer to confirm pricing and the order before fulfillment. When the item is ready, direct them to Hueneme High School, Room Q10.
+        {order.guestCheckout && <span className="block mt-1 font-semibold">Guest submission: no customer account is linked.</span>}
+      </div>}
       {order.notes&&<p className="text-xs"><strong>Order notes:</strong> {order.notes}</p>}
       <div className="border border-slate-200 rounded p-3 space-y-3">
         <div className="flex items-center justify-between gap-2"><strong className="text-xs uppercase">Order details</strong><button type="button" onClick={()=>setEditing(!editing)} className="text-red-700 text-xs font-bold flex items-center gap-1"><Pencil className="w-3.5 h-3.5"/>{editing?'Cancel editing':'Edit order'}</button></div>
         {editing&&<form onSubmit={save} className="grid sm:grid-cols-2 gap-3 text-xs">
-          {([['quantity','Quantity'],['selectedColor','Color'],['selectedMaterial','Material'],['pickupLocation','Pickup location'],['contactEmail','Email'],['contactPhone','Phone']] as const).map(([key,label])=><label key={key} className="space-y-1"><span className="block font-semibold">{label}</span><input className="w-full border border-slate-300 rounded p-2" type={key==='quantity'?'number':'text'} min={key==='quantity'?1:undefined} max={key==='quantity'?1000:undefined} value={String(draft[key]??'')} onChange={e=>setDraft(d=>({...d,[key]:key==='quantity'?Number(e.target.value):e.target.value}))}/></label>)}
+          {([['quantity','Quantity'],['selectedColor','Color'],['selectedSize','Apparel size'],['selectedMaterial','Material'],['pickupLocation','Pickup location'],['contactEmail','Email'],['contactPhone','Phone']] as const).map(([key,label])=><label key={key} className="space-y-1"><span className="block font-semibold">{label}</span><input className="w-full border border-slate-300 rounded p-2" type={key==='quantity'?'number':'text'} min={key==='quantity'?1:undefined} max={key==='quantity'?1000:undefined} value={String(draft[key]??'')} onChange={e=>setDraft(d=>({...d,[key]:key==='quantity'?Number(e.target.value):e.target.value}))}/></label>)}
           <label className="sm:col-span-2 space-y-1"><span className="block font-semibold">Notes</span><textarea className="w-full border border-slate-300 rounded p-2" rows={3} value={draft.notes||''} onChange={e=>setDraft(d=>({...d,notes:e.target.value}))}/></label>
           <button disabled={busy||processing} type="submit" className="bg-slate-900 text-white rounded px-3 py-2 flex gap-2 justify-center items-center font-bold"><Save className="w-4 h-4"/>Save order</button>
         </form>}

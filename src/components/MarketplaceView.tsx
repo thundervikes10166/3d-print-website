@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { useLab } from '../context/LabContext';
 import { ProductCard } from './ProductCard';
+import { isMerchListing } from '../lib/listingKinds';
 import {
   Search,
   PlusCircle,
@@ -28,7 +29,7 @@ export const MarketplaceView: React.FC = () => {
   const publishedListings = useMemo(() => {
     return listings.filter((item) => {
       const isApproved = item.status === 'published';
-      if (!isApproved) return false;
+      if (!isApproved || isMerchListing(item)) return false;
 
       const categoryMatch =
         selectedCategory === 'All' || item.category === selectedCategory;
@@ -54,7 +55,7 @@ export const MarketplaceView: React.FC = () => {
   const categoryNames = useMemo(() => {
     const base = ['All', 'Robotics', 'Desk Accessories', 'Toys', 'Woodwork', 'Games', 'Decorations', 'Other'];
     // Hide the retired Tools category even if it remains in existing Firestore category records.
-    const dynamic = categories.map((c) => c.name).filter((name) => name.trim().toLowerCase() !== 'tools');
+    const dynamic = categories.map((c) => c.name).filter((name) => name.trim().toLowerCase() !== 'tools' && !isMerchListing(name));
     return Array.from(new Set([...base, ...dynamic]));
   }, [categories]);
 
@@ -66,15 +67,15 @@ export const MarketplaceView: React.FC = () => {
         <div className="space-y-2 max-w-2xl">
           <div className="inline-flex items-center gap-2 px-2.5 py-0.5 bg-red-50 border border-red-100 rounded text-[10px] font-mono font-bold uppercase tracking-wider text-[#C41E3A]">
             <Printer className="w-3.5 h-3.5" />
-            <span>Hueneme High School • Room Q10 Print Lab</span>
+            <span>Hueneme High School • Room Q10</span>
           </div>
 
           <h1 className="text-2xl sm:text-3xl font-extrabold uppercase tracking-tight text-slate-900 leading-tight">
-            Robotics 3D Print Exchange
+            Shop 3D Prints & Woodwork
           </h1>
 
           <p className="text-xs sm:text-sm text-slate-600 font-normal leading-relaxed">
-            Browse verified mechanical brackets, custom lab accessories, and student-engineered prints.
+            Browse 3D prints, robotics items, and student-made woodwork projects. Clothing is in the Merch tab.
           </p>
         </div>
 
@@ -93,7 +94,7 @@ export const MarketplaceView: React.FC = () => {
               className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-800 border border-slate-200 rounded text-xs font-bold uppercase tracking-wider transition-colors flex items-center gap-1.5 shadow-xs"
             >
               <PlusCircle className="w-3.5 h-3.5 text-[#C41E3A]" />
-              <span>Publish Model</span>
+              <span>Add Product</span>
             </button>
           )}
         </div>
@@ -119,7 +120,7 @@ export const MarketplaceView: React.FC = () => {
             <span className="font-bold text-slate-900 uppercase">
               {publishedListings.length}
             </span>{' '}
-            MODELS AVAILABLE
+            ITEMS AVAILABLE
           </div>
         </div>
 
@@ -192,7 +193,7 @@ export const MarketplaceView: React.FC = () => {
                 className="px-4 py-2 bg-[#C41E3A] hover:bg-[#A0182E] text-white rounded text-xs font-bold uppercase tracking-wider transition-colors inline-flex items-center gap-1.5 shadow-xs"
               >
                 <PlusCircle className="w-4 h-4" />
-                <span>Publish Model</span>
+                <span>Add Product</span>
               </button>
             ) : (
               <button

@@ -1,20 +1,16 @@
 import React, { useState } from 'react';
+import { getIdToken } from 'firebase/auth';
 import { useLab } from '../context/LabContext';
 import {
   ArrowLeft,
-  Clock,
-  Layers,
-  Box,
   CheckCircle2,
   AlertCircle,
-  ShieldCheck,
   Send,
-  CreditCard,
   Phone,
   Mail,
-  User,
 } from 'lucide-react';
 import { PreferredUpdateMethod } from '../types';
+import { isMerchListing } from '../lib/listingKinds';
 
 export const ProductPageView: React.FC = () => {
   const {
@@ -23,12 +19,12 @@ export const ProductPageView: React.FC = () => {
     navigateTo,
     currentUser,
     userProfile,
-    createOrder,
-    setShowAuthModal,
-    openPaymentGateway,
   } = useLab();
 
   const product = listings.find((p) => p.id === selectedProductId);
+  const isMerch = product ? isMerchListing(product) : false;
+  const backView = isMerch ? 'merch' : 'marketplace';
+  const isWoodwork = product?.category === 'Woodwork';
 
   // Customer Contact Fields (Requirement 5)
   const [firstName, setFirstName] = useState(
@@ -44,11 +40,12 @@ export const ProductPageView: React.FC = () => {
   const [preferredUpdateMethod, setPreferredUpdateMethod] = useState<PreferredUpdateMethod | ''>('');
 
   // Inquiry options
-  const [selectedColor, setSelectedColor] = useState<string>('Standard White');
-  const [selectedMaterial, setSelectedMaterial] = useState<string>(product?.material || 'PLA');
+  const [selectedColor, setSelectedColor] = useState<string>(product?.specs?.availableColors?.[0] || 'Signal Red');
   const [quantity, setQuantity] = useState<number>(1);
+  const [selectedSize, setSelectedSize] = useState('');
   const [orderNotes, setOrderNotes] = useState<string>('');
-  const [payDepositNow, setPayDepositNow] = useState<boolean>(true);
+  // Honeypot: bots may fill this field, normal visitors never see it.
+  const [website, setWebsite] = useState('');
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -61,32 +58,24 @@ export const ProductPageView: React.FC = () => {
           Listing Not Found
         </h2>
         <p className="text-xs text-slate-500">
-          The requested 3D model may have been moved or updated.
+          The requested item may have been moved or updated.
         </p>
         <button
-          onClick={() => navigateTo('marketplace')}
+          onClick={() => navigateTo(backView)}
           className="px-4 py-2 bg-slate-900 text-white text-xs font-bold uppercase tracking-wider rounded"
         >
-          Return to Marketplace
+          Back to Store
         </button>
       </div>
     );
   }
 
-  const title = product.title || product.name || 'Custom 3D Print';
+  const title = product.title || product.name || 'Product';
   const makerName = product.creatorDisplayName || product.makerName || 'Student Maker';
-  const price = product.price ?? product.priceAmount ?? 0;
-  const estimatedTotal = (price * quantity).toFixed(2);
-  const depositSuggested = Math.max(2.0, Number((price * quantity * 0.25).toFixed(2)));
 
   const handleRequestQuote = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
-
-    if (!currentUser) {
-      setShowAuthModal(true);
-      return;
-    }
 
     // Customer Updates Requirement (Requirement 5):
     // Require First Name, Last Name, and at least one Contact Point (Email or Phone Number)
@@ -99,7 +88,17 @@ export const ProductPageView: React.FC = () => {
     const hasPhone = contactPhone.trim().length > 0;
 
     if (!hasEmail && !hasPhone) {
-      setFormError('At least one contact point (Email or Phone Number) is required to activate order updates.');
+      setFormError('Please provide an email or phone number so we can contact you to confirm the order.');
+      return;
+    }
+
+    if (isMerch && product?.merchSizes?.length && !product.merchSizes.includes(selectedSize)) {
+      setFormError('Please select a valid apparel size.');
+      return;
+    }
+
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 15) {
+      setFormError('Please choose a quantity between 1 and 15.');
       return;
     }
 
@@ -121,38 +120,35 @@ export const ProductPageView: React.FC = () => {
     setIsSubmitting(true);
 
     try {
-      const orderId = await createOrder({
-        buyerId: currentUser.uid,
-        buyerDisplayName: `${firstName.trim()} ${lastName.trim()}`,
-        customerFirstName: firstName.trim(),
-        customerLastName: lastName.trim(),
-        contactEmail: contactEmail.trim() || undefined,
-        contactPhone: contactPhone.trim() || undefined,
-        preferredUpdateMethod,
-        updatesActivated: true,
-        sellerId: product.creatorId || product.makerId || '',
-        sellerDisplayName: makerName,
-        listingId: product.id,
-        listingTitle: title,
-        listingImageUrl: product.imageUrl,
-        quantity,
-        priceAtTimeOfOrder: price,
-        selectedColor,
-        selectedMaterial,
-        notes: orderNotes.trim() || undefined,
-        isQuoteRequest: true,
-        pickupLocation: 'Hueneme High School • Room Q10 Print Pickup Shelf',
+      // The Netlify Function validates the product/price against Firestore,
+      // protects the guest write, and creates a request in the shop orders queue.
+      // A logged-in buyer is linked to their purchase history automatically.
+      const idToken = currentUser ? await getIdToken(currentUser).catch(() => null) : null;
+      const response = await fetch('/.netlify/functions/submit-shop-estimate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+        },
+        body: JSON.stringify({
+          listingId: product.id,
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          contactEmail: contactEmail.trim(),
+          contactPhone: contactPhone.trim(),
+          preferredUpdateMethod,
+          selectedColor,
+          selectedSize: isMerch ? selectedSize : '',
+          quantity,
+          notes: orderNotes.trim(),
+          website,
+        }),
       });
-
-      setCreatedOrderId(orderId);
-
-      if (payDepositNow) {
-        openPaymentGateway({
-          orderId,
-          orderTitle: `${title} (${quantity} unit)`,
-          amount: depositSuggested,
-        });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.orderId) {
+        throw new Error(result?.error || 'Could not submit your request. Please try again or email the team.');
       }
+      setCreatedOrderId(result.orderId);
     } catch (err: any) {
       console.error('Quote request error:', err);
       setFormError(err.message || 'Failed to submit quote inquiry.');
@@ -169,11 +165,11 @@ export const ProductPageView: React.FC = () => {
       {/* Navigation */}
       <div>
         <button
-          onClick={() => navigateTo('marketplace')}
+          onClick={() => navigateTo(backView)}
           className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-600 hover:text-slate-900 transition-colors"
         >
           <ArrowLeft className="w-4 h-4" />
-          <span>Back to Marketplace</span>
+          <span>Back to {isMerch ? 'Merch' : 'Shop'}</span>
         </button>
       </div>
 
@@ -200,10 +196,10 @@ export const ProductPageView: React.FC = () => {
             <div className="p-5 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="px-2.5 py-0.5 bg-red-50 text-[#C41E3A] border border-red-100 rounded text-xs font-mono font-bold">
-                  {product.material || 'PLA'}
+                  {product.material || (isMerch ? 'Apparel' : 'Made to order')}
                 </span>
                 <span className="text-xs font-mono text-slate-500">
-                  Est. Delivery: {product.estimatedProductionTime || '2-3 Days'}
+                  Est. Delivery: {product.estimatedProductionTime || 'Confirm availability'}
                 </span>
               </div>
 
@@ -221,29 +217,28 @@ export const ProductPageView: React.FC = () => {
           <div className="p-3.5 bg-amber-50/90 border border-amber-200 rounded-lg text-xs text-amber-900 flex items-start gap-2 shadow-xs">
             <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
             <div className="leading-snug">
-              <span className="font-bold">Notice:</span> Students or teachers must align on pricing details prior to entering production, as costs vary.
+              <span className="font-bold">Before fulfillment:</span> Submit your request without an account. Our team will contact you to confirm availability, your order, and the estimate before we start preparing it.
             </div>
           </div>
 
-          {/* Refund Notice (Requirement 4) */}
-          <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-[11px] text-slate-600 leading-relaxed">
-            <strong className="text-slate-800">Refund Policy:</strong> Handling and processing refunds is purely the teacher's responsibility.
+          <div className="p-3 bg-sky-50 border border-sky-200 rounded-lg text-xs text-sky-900 leading-relaxed">
+            <strong>Pickup notice:</strong> When your order is complete and ready for pickup, visit <strong>Hueneme High School, Room Q10</strong>. Please wait for our team to confirm it is ready.
           </div>
         </div>
 
-        {/* Right Column: Quote Inquiry & Deposit Form */}
+        {/* Right Column: Guest-friendly quote inquiry */}
         <div className="lg:col-span-6">
           <div className="bg-white rounded-lg border border-slate-200 p-6 shadow-sm space-y-5">
             
             <div>
               <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#C41E3A] mb-1">
-                ROOM Q10 • QUOTE INQUIRY
+                ROOM Q10 • SHOP INQUIRY
               </div>
               <h2 className="text-lg font-extrabold uppercase tracking-tight text-slate-900">
                 Request Custom Quote
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                Submit an inquiry to receive a custom pricing and delivery estimate.
+                No account required. Share your contact details and we will reach out to confirm your order and estimate before making or preparing the item.
               </p>
             </div>
 
@@ -254,41 +249,20 @@ export const ProductPageView: React.FC = () => {
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
                     <span className="font-bold uppercase tracking-wider font-mono">
-                      Quote Request Queued
+                      Request Received
                     </span>
                   </div>
                   <p className="leading-relaxed">
-                    Your quote inquiry for <strong>{title}</strong> has been stored. The student print handler will review and update the pricing and turnaround.
+                    Your request for <strong>{title}</strong> has been received. Our team will contact you to confirm your order and estimate <strong>before fulfillment begins</strong>.
                   </p>
-                  <div className="pt-1 text-[11px] font-mono text-emerald-800">
-                    Preferred Updates: {preferredUpdateMethod === 'email' ? 'Email' : 'Phone'} ({preferredUpdateMethod === 'email' ? contactEmail : contactPhone})
-                  </div>
+                  <p className="pt-1 font-mono text-[11px]">Request reference: <strong>#{createdOrderId.slice(0, 8).toUpperCase()}</strong></p>
+                  <p>When we tell you the item is ready for pickup, please visit <strong>Hueneme High School, Room Q10</strong>.</p>
+                  {!currentUser && <p>Guest requests do not appear in online purchase history. Save your reference number for follow-up.</p>}
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      openPaymentGateway({
-                        orderId: createdOrderId,
-                        orderTitle: title,
-                        amount: depositSuggested,
-                      })
-                    }
-                    className="py-2.5 px-3 bg-[#C41E3A] hover:bg-[#A0182E] text-white text-xs font-bold uppercase tracking-wider rounded transition-colors flex items-center justify-center gap-1.5"
-                  >
-                    <CreditCard className="w-3.5 h-3.5" />
-                    <span>Payment Instructions</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => navigateTo('my_requests')}
-                    className="py-2.5 px-3 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold uppercase tracking-wider rounded transition-colors text-center"
-                  >
-                    View My Requests
-                  </button>
-                </div>
+                <button type="button" onClick={() => navigateTo(backView)} className="w-full py-2.5 px-3 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold uppercase tracking-wider rounded">
+                  Continue Browsing
+                </button>
               </div>
             ) : (
               <form onSubmit={handleRequestQuote} className="space-y-4">
@@ -314,6 +288,8 @@ export const ProductPageView: React.FC = () => {
                       <input
                         type="text"
                         value={firstName}
+                        required
+                        maxLength={80}
                         onChange={(e) => setFirstName(e.target.value)}
                         placeholder="First"
                         className="w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded focus:bg-white focus:border-[#C41E3A] outline-hidden font-medium"
@@ -326,6 +302,8 @@ export const ProductPageView: React.FC = () => {
                       <input
                         type="text"
                         value={lastName}
+                        required
+                        maxLength={80}
                         onChange={(e) => setLastName(e.target.value)}
                         placeholder="Last"
                         className="w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded focus:bg-white focus:border-[#C41E3A] outline-hidden font-medium"
@@ -342,6 +320,7 @@ export const ProductPageView: React.FC = () => {
                         <input
                           type="email"
                           value={contactEmail}
+                          maxLength={254}
                           onChange={(e) => setContactEmail(e.target.value)}
                           placeholder="name@oxnardunion.org"
                           className="w-full pl-7 pr-2 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded focus:bg-white focus:border-[#C41E3A] outline-hidden"
@@ -351,12 +330,13 @@ export const ProductPageView: React.FC = () => {
                     </div>
                     <div>
                       <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">
-                        Phone (SMS Updates)
+                        Phone Contact
                       </label>
                       <div className="relative">
                         <input
                           type="tel"
                           value={contactPhone}
+                          maxLength={30}
                           onChange={(e) => setContactPhone(e.target.value)}
                           placeholder="(805) 555-0199"
                           className="w-full pl-7 pr-2 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded focus:bg-white focus:border-[#C41E3A] outline-hidden"
@@ -374,8 +354,8 @@ export const ProductPageView: React.FC = () => {
                     </legend>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {([
-                        { value: 'email' as const, label: 'Email', detail: 'Detailed updates', Icon: Mail },
-                        { value: 'phone' as const, label: 'Phone', detail: 'SMS or call updates', Icon: Phone },
+                        { value: 'email' as const, label: 'Email', detail: 'We will reach out by email', Icon: Mail },
+                        { value: 'phone' as const, label: 'Phone', detail: 'We will reach out by phone', Icon: Phone },
                       ]).map(({ value, label, detail, Icon }) => (
                         <label
                           key={value}
@@ -404,16 +384,16 @@ export const ProductPageView: React.FC = () => {
                   </fieldset>
                 </div>
 
-                {/* Print Specifications */}
+                {/* Item Options */}
                 <div className="space-y-3 pt-2">
                   <div className="text-xs font-bold uppercase tracking-wider text-slate-800 border-b border-slate-100 pb-1">
-                    Print Specifications
+                    Item Options
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">
-                        Filament Color
+                        {isMerch ? 'Clothing Color' : isWoodwork ? 'Finish / Color' : 'Filament Color'}
                       </label>
                       <select
                         value={selectedColor}
@@ -428,6 +408,13 @@ export const ProductPageView: React.FC = () => {
                       </select>
                     </div>
 
+                    {isMerch && !!product.merchSizes?.length && <div>
+                      <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">Size *</label>
+                      <select required value={selectedSize} onChange={e => setSelectedSize(e.target.value)} className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded focus:bg-white focus:border-[#C41E3A] outline-hidden">
+                        <option value="">Select a size</option>
+                        {product.merchSizes.map(size=><option key={size} value={size}>{size}</option>)}
+                      </select>
+                    </div>}
                     <div>
                       <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">
                         Quantity
@@ -436,6 +423,7 @@ export const ProductPageView: React.FC = () => {
                         type="number"
                         min={1}
                         max={15}
+                        required
                         value={quantity}
                         onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
                         className="w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded focus:bg-white focus:border-[#C41E3A] outline-hidden font-mono font-bold"
@@ -450,24 +438,21 @@ export const ProductPageView: React.FC = () => {
                     <textarea
                       rows={2}
                       value={orderNotes}
+                      maxLength={1500}
                       onChange={(e) => setOrderNotes(e.target.value)}
-                      placeholder="Special requirements, infill density, or target completion date..."
+                      placeholder="Special requests, preferred style, or needed-by date..."
                       className="w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded focus:bg-white focus:border-[#C41E3A] outline-hidden"
                     />
                   </div>
 
-                  {/* Deposit Checkbox */}
-                  <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer pt-1">
-                    <input
-                      type="checkbox"
-                      checked={payDepositNow}
-                      onChange={(e) => setPayDepositNow(e.target.checked)}
-                      className="rounded text-[#C41E3A] focus:ring-[#C41E3A]"
-                    />
-                    <span>
-                      Show payment instructions after inquiry submission (${depositSuggested.toFixed(2)} suggested deposit)
-                    </span>
-                  </label>
+                  {/* Hidden honeypot. Real users leave this blank. */}
+                  <div className="absolute -left-[9999px] opacity-0 pointer-events-none" aria-hidden="true">
+                    <label htmlFor="quote-website">Website</label>
+                    <input id="quote-website" name="website" type="text" autoComplete="off" tabIndex={-1} value={website} onChange={e => setWebsite(e.target.value)} />
+                  </div>
+                  <p className="text-xs text-slate-600 bg-sky-50 border border-sky-200 rounded p-3">
+                    <strong>What happens next?</strong> We will contact you to confirm the estimate and your order before production starts. Once it is complete and ready for pickup, visit <strong>Room Q10 at Hueneme High School</strong>.
+                  </p>
                 </div>
 
                 {/* Submit Action */}
@@ -482,7 +467,7 @@ export const ProductPageView: React.FC = () => {
                     ) : (
                       <>
                         <Send className="w-3.5 h-3.5" />
-                        <span>Request Quote</span>
+                        <span>Submit Estimate Request</span>
                       </>
                     )}
                   </button>

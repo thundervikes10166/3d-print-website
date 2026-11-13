@@ -13,6 +13,7 @@ import {
   HelpCircle,
 } from 'lucide-react';
 import { MaterialType, Category } from '../types';
+import { isMerchListing } from '../lib/listingKinds';
 
 const CATEGORIES: Category[] = [
   'Desk Accessories',
@@ -21,6 +22,10 @@ const CATEGORIES: Category[] = [
   'Games',
   'Toys',
   'Woodwork',
+  'T-Shirts',
+  'Hats',
+  'Hoodies',
+  'Other Merch',
   'Other',
 ];
 
@@ -52,7 +57,18 @@ export const CreateEditListingView: React.FC = () => {
   );
   const [price, setPrice] = useState<number>(existingListing?.price ?? existingListing?.priceAmount ?? 3.5);
   const [priceType, setPriceType] = useState<'fixed' | 'quote'>(existingListing?.priceType || 'fixed');
-  const [material, setMaterial] = useState<MaterialType>((existingListing?.material as MaterialType) || 'PLA');
+  const isMerch = isMerchListing(category);
+  const isWoodwork = category === 'Woodwork';
+  const isPrint = !isMerch && !isWoodwork;
+  const [material, setMaterial] = useState<MaterialType>(
+    MATERIALS.includes(existingListing?.material as MaterialType) ? existingListing!.material as MaterialType : 'PLA'
+  );
+  const [itemMaterial, setItemMaterial] = useState(
+    existingListing && (isMerchListing(existingListing) || existingListing.category === 'Woodwork') ? existingListing.material : 'Cotton blend'
+  );
+  const [merchSizes, setMerchSizes] = useState(
+    existingListing?.merchSizes?.join(', ') || 'S, M, L, XL, 2XL'
+  );
   const [imageUrl, setImageUrl] = useState(existingListing?.imageUrl || '');
   const [estimatedProductionTime, setEstimatedProductionTime] = useState(
     existingListing?.estimatedProductionTime || '2-3 school days'
@@ -63,7 +79,7 @@ export const CreateEditListingView: React.FC = () => {
   const [printTimeHours, setPrintTimeHours] = useState(existingListing?.specs?.printTimeHours || 2.5);
   const [filamentGrams, setFilamentGrams] = useState(existingListing?.specs?.filamentGrams || 45);
   const [availableColors, setAvailableColors] = useState<string>(
-    existingListing?.specs?.availableColors?.join(', ') || 'Signal Blue, Stealth Black, White'
+    existingListing?.specs?.availableColors?.join(', ') || (isMerch ? 'Red, Black, White' : 'Signal Blue, Stealth Black, White')
   );
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -127,7 +143,8 @@ export const CreateEditListingView: React.FC = () => {
         price: Number(price),
         priceAmount: Number(price),
         priceType,
-        material,
+        material: isPrint ? material : itemMaterial.trim(),
+        merchSizes: isMerch ? merchSizes.split(',').map(s => s.trim()).filter(Boolean) : [],
         estimatedProductionTime,
         imageUrl,
         specs: {
@@ -136,7 +153,7 @@ export const CreateEditListingView: React.FC = () => {
           infill,
           printTimeHours: Number(printTimeHours),
           filamentGrams: Number(filamentGrams),
-          supportedMaterials: [material],
+          supportedMaterials: isPrint ? [material] : [],
           availableColors: colorsArray.length > 0 ? colorsArray : ['Standard White', 'Stealth Black'],
         },
         status: 'published',
@@ -148,7 +165,7 @@ export const CreateEditListingView: React.FC = () => {
       } else {
         await createListing(listingPayload as any);
         setSubmitSuccess(
-          'Product published successfully and now visible in the store!'
+          'Product published successfully and now visible in its store section!'
         );
       }
 
@@ -183,10 +200,10 @@ export const CreateEditListingView: React.FC = () => {
           FIRESTORE_CATALOG_SYNC • ROOM Q10
         </div>
         <h1 className="text-xl sm:text-2xl font-extrabold uppercase tracking-tight text-white">
-          {editingListingId ? 'Edit Model Listing' : 'Publish New 3D Model Listing'}
+          {editingListingId ? 'Edit Product Listing' : 'Add Shop or Merch Listing'}
         </h1>
         <p className="text-xs sm:text-sm text-slate-300 mt-1 font-normal leading-relaxed">
-          Create verified 3D prints for the school marketplace. Provide technical print specs and material replacement costs.
+          Publish 3D prints, woodwork, or clothing. Select a clothing category to show sizes and apparel options.
         </p>
       </div>
 
@@ -222,7 +239,7 @@ export const CreateEditListingView: React.FC = () => {
 
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
-              Model Title *
+              Product Title *
             </label>
             <input
               type="text"
@@ -254,19 +271,18 @@ export const CreateEditListingView: React.FC = () => {
 
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
-                Primary Material *
+                {isMerch ? 'Fabric / Material *' : isWoodwork ? 'Wood / Material *' : 'Primary Material *'}
               </label>
-              <select
+              {!isPrint ? <input
+                type="text" required value={itemMaterial}
+                onChange={e=>setItemMaterial(e.target.value)}
+                placeholder={isMerch ? 'Cotton, polyester, cotton blend...' : 'Pine, plywood, hardwood...'}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded text-xs text-slate-900 focus:bg-white focus:border-red-600 outline-hidden"
+              /> : <select
                 value={material}
-                onChange={(e) => setMaterial(e.target.value as MaterialType)}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded text-xs text-slate-900 focus:bg-white focus:border-red-600 outline-hidden font-mono font-bold"
-              >
-                {MATERIALS.map((m) => (
-                  <option key={m} value={m}>
-                    {m} Filament
-                  </option>
-                ))}
-              </select>
+                onChange={e=>setMaterial(e.target.value as MaterialType)}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded text-xs text-slate-900 focus:bg-white focus:border-red-600 outline-hidden font-bold uppercase"
+              >{MATERIALS.map(m=><option key={m} value={m}>{m}</option>)}</select>}
             </div>
           </div>
 
@@ -284,6 +300,17 @@ export const CreateEditListingView: React.FC = () => {
             />
           </div>
         </div>
+
+        {!isPrint && <div className="border border-slate-200 rounded bg-sky-50 p-4 space-y-3">
+          <h3 className="text-xs font-black uppercase">{isMerch ? 'Merch options' : 'Woodwork options'}</h3>
+          {isMerch && <label className="block text-xs font-bold">Available sizes (comma-separated)
+            <input type="text" value={merchSizes} onChange={e=>setMerchSizes(e.target.value)} placeholder="S, M, L, XL, 2XL" className="mt-1 w-full p-2 border border-slate-200 rounded bg-white text-xs" />
+          </label>}
+          <label className="block text-xs font-bold">{isMerch ? 'Available clothing colors' : 'Available finishes / colors'} (comma-separated)
+            <input type="text" value={availableColors} onChange={e=>setAvailableColors(e.target.value)} placeholder="Red, Black, White" className="mt-1 w-full p-2 border border-slate-200 rounded bg-white text-xs" />
+          </label>
+          <p className="text-xs text-slate-600">{isMerch ? 'Clothing appears only in Merch. Customers choose a size and color when requesting an estimate.' : 'Woodwork appears in Shop. Customers choose a finish/color when available.'}</p>
+        </div>}
 
         {/* Section 2: Image URL (Storage-free image support) */}
         <div className="space-y-4">
@@ -329,8 +356,8 @@ export const CreateEditListingView: React.FC = () => {
           )}
         </div>
 
-        {/* Section 3: Technical Fabrication Specs */}
-        <div className="space-y-4">
+        {/* Technical fabrication specs are not relevant to apparel. */}
+        {isPrint && <div className="space-y-4">
           <div className="text-[11px] font-mono font-bold uppercase tracking-wider text-slate-500 pb-2 border-b border-slate-200">
             03. SLICING & PRINT SPECS
           </div>
@@ -413,12 +440,12 @@ export const CreateEditListingView: React.FC = () => {
               />
             </div>
           </div>
-        </div>
+        </div>}
 
         {/* Section 4: Classroom Fee & Turnaround */}
         <div className="space-y-4">
           <div className="text-[11px] font-mono font-bold uppercase tracking-wider text-slate-500 pb-2 border-b border-slate-200">
-            04. MATERIAL REIMBURSEMENT & TURNAROUND
+            04. PRICING & AVAILABILITY
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -454,7 +481,7 @@ export const CreateEditListingView: React.FC = () => {
 
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
-                Turnaround SLA
+                Estimated availability / turnaround
               </label>
               <input
                 type="text"
