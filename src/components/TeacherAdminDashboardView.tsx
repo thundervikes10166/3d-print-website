@@ -13,7 +13,7 @@ const secondary='bg-white hover:bg-slate-100 text-slate-800 border border-slate-
 export const TeacherAdminDashboardView:React.FC=()=>{
   const lab=useLab();
   const {currentUser,isAdminWhitelisted,canManageStore,canManageAccounts,setShowAuthModal,
-    listings,orders,requests,categories,classStudents,studentApplications,adminWhitelist,
+    listings,orders,requests,categories,classStudents,studentApplications,adminWhitelist,adminAccountRecords,
     navigateTo,approveListing,deleteListing,updateRequestStatus,updateRequestDetails,addRequestNote,
     updateOrderStatus,updateOrderDetails,addCategory,deleteCategory,
     approveStudentApplication,rejectStudentApplication,addClassStudent,removeClassStudent,
@@ -110,8 +110,46 @@ export const TeacherAdminDashboardView:React.FC=()=>{
         {filteredStudents.map(student=><div key={student.id} className="flex flex-wrap gap-2 justify-between items-center border-b border-slate-100 py-3"><div><strong className="block text-sm">{student.name||student.email}</strong><span className="text-xs text-slate-500">{student.email} · {student.period||'Class Student'} {student.approved!==true?'· Legacy entry: reapprove via registration':''}</span></div><div className="flex gap-2 items-center"><button className={`${student.canPublish&&student.approved?'bg-emerald-50 text-emerald-700 border-emerald-200':'bg-slate-100 text-slate-500 border-slate-200'} border rounded px-3 py-2 text-xs font-bold`} disabled={busy||!student.approved} onClick={()=>guarded(()=>updateClassStudent(student.id,{canPublish:!student.canPublish}),`Student access ${student.canPublish?'paused':'restored'}.`)}>{student.canPublish&&student.approved?'Active: Pause':'Paused: Resume'}</button><button disabled={busy} title="Remove Class Student access" className="p-2 rounded text-red-700 hover:bg-red-50" onClick={()=>{if(window.confirm(`Remove class access for ${student.email}? This does not delete the login account.`))guarded(()=>removeClassStudent(student.id),'Class access removed.');}}><Trash2 className="w-4 h-4"/></button></div></div>)}
       </div>
     </section>}
-    {activeTab==='admin_accounts'&&canManageAccounts&&<section className="bg-white border border-slate-200 rounded p-5 space-y-4"><h2 className="text-base font-extrabold">Admin Accounts</h2><p className="text-xs text-slate-600">The trusted Firestore users/UID role controls full administrator permissions. Adding or removing an email here does not change that role. To revoke a full admin, also change their Firebase user role in Console.</p><form className="flex gap-2" onSubmit={e=>{e.preventDefault();guarded(()=>addAdminEmail(adminEmail),'Email added to admin allowlist.').then(()=>setAdminEmail(''));}}><input type="email" required value={adminEmail} onChange={e=>setAdminEmail(e.target.value)} className="flex-1 border rounded p-2 text-sm" placeholder="Administrator email"/><button disabled={busy} className={`${primary} rounded px-3 py-2 text-xs font-bold`}>Add</button></form>
-      {adminWhitelist.map(email=><div key={email} className="flex gap-2 items-center justify-between border-b py-2 text-sm"><span>{email}</span>{email.toLowerCase()===BASELINE_ADMIN_WHITELIST[0].toLowerCase()?<span className="text-xs text-slate-500">Protected</span>:<button className="text-red-700" title="Remove email from list (does not revoke Firebase admin role)" onClick={()=>{if(window.confirm(`Remove ${email} from the admin allowlist?`))guarded(()=>removeAdminEmail(email),'Admin email removed.');}}><Trash2 className="w-4 h-4"/></button>}</div>)}
-    </section>}
+    {activeTab === 'admin_accounts' && canManageAccounts && (
+      <section className="bg-white border border-slate-200 rounded p-5 space-y-4">
+        <div className="space-y-2">
+          <h2 className="text-base font-extrabold">Admin Accounts</h2>
+          <p className="text-sm text-slate-600">
+            Invite an administrator by email. They will receive a link, register with their own password (or sign in to an existing account), and select <strong>Activate Admin Access</strong>. Their account stays a Buyer until they accept.
+          </p>
+        </div>
+        <form className="flex flex-wrap gap-2" onSubmit={e => {
+          e.preventDefault();
+          run(() => addAdminEmail(adminEmail), `Invitation email sent to ${adminEmail.trim().toLowerCase()}. Access activates after they accept.`)
+            .then(() => setAdminEmail(''))
+            .catch(() => {});
+        }}>
+          <input type="email" required value={adminEmail} onChange={e=>setAdminEmail(e.target.value)} className="min-w-[200px] flex-1 border rounded p-2 text-sm" placeholder="Administrator email" aria-label="Administrator email" />
+          <button disabled={busy} className={`${primary} rounded px-3 py-2 text-xs font-bold`}>
+            Send admin invitation
+          </button>
+        </form>
+        <p className="text-xs text-slate-500">Invitations expire after 72 hours. Invited people are not administrators until they accept the email invitation.</p>
+        {adminWhitelist.map(email => {
+          const isOwner = email.toLowerCase() === BASELINE_ADMIN_WHITELIST[0].toLowerCase();
+          const status = adminAccountRecords.find(record => record.email === email.toLowerCase())?.status;
+          return (
+            <div key={email} className="flex flex-wrap gap-2 items-center justify-between border-b py-3 text-sm">
+              <div>
+                <span className="block font-semibold">{email}</span>
+                <span className="text-xs text-slate-500">{isOwner ? 'Protected owner' : status === 'active' ? 'Active admin' : status === 'invited' ? 'Invitation pending' : 'Existing listing: role must be verified'}</span>
+              </div>
+              {isOwner ? <span className="text-xs text-slate-500">Protected</span> : (
+                <button type="button" disabled={busy} className="flex items-center gap-1 text-xs text-red-700 hover:text-red-900" title="Revoke administrator access or cancel invitation" onClick={() => {
+                  if (window.confirm(`Revoke admin access or cancel the invitation for ${email}?`))
+                    guarded(() => removeAdminEmail(email), `Access revoked or invitation cancelled for ${email}.`);
+                }}><Trash2 className="w-4 h-4" /> Revoke</button>
+              )}
+            </div>
+          );
+        })}
+      </section>
+    )}
+
   </div>;
 };

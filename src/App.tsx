@@ -1,6 +1,7 @@
 import React from 'react';
 import { useLab } from './context/LabContext';
 import { Navbar } from './components/Navbar';
+import { AdminInvitationBanner } from './components/AdminInvitationBanner';
 import { MarketplaceView } from './components/MarketplaceView';
 import { MerchView } from './components/MerchView';
 import { ProductPageView } from './components/ProductPageView';
@@ -29,6 +30,7 @@ export function App() {
 
       {/* Main Dynamic Viewport */}
       <main className="grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-6">
+        <AdminInvitationBanner />
         {activeView === 'marketplace' && <MarketplaceView />}
         {activeView === 'merch' && <MerchView />}
         {activeView === 'product_detail' && <ProductPageView />}

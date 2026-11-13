@@ -149,6 +149,23 @@ export const Navbar: React.FC = () => {
         </div>
       </div>
 
+      {/* Keep the three public store sections visible on phones without opening
+          the account hamburger menu. Staff-only links stay in the menu. */}
+      <div className="md:hidden grid grid-cols-3 gap-1 px-3 py-2 border-t border-slate-800">
+        {([
+          ['marketplace', 'Shop'],
+          ['custom_request', 'Request'],
+          ['merch', 'Merch'],
+        ] as const).map(([view, label]) => (
+          <button
+            key={view}
+            type="button"
+            onClick={() => handleNav(view)}
+            className={`rounded px-2 py-2 text-xs font-mono font-bold uppercase tracking-wide ${activeView === view ? 'bg-[#C41E3A] text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+          >{label}</button>
+        ))}
+      </div>
+
       {currentUser && accountMenuOpen && (
         <div className="absolute right-4 sm:right-6 lg:right-8 top-14 sm:top-16 z-50 w-64 rounded-lg border border-slate-700 bg-slate-900 p-4 shadow-xl">
           <div className="border-b border-slate-800 pb-3">
@@ -176,13 +193,6 @@ export const Navbar: React.FC = () => {
       {mobileMenuOpen && (
         <div className="md:hidden bg-slate-950 border-b border-slate-800 px-4 pt-2 pb-6 space-y-3">
           <div className="flex flex-col space-y-1">
-            {([
-              ['marketplace', 'Shop'],
-              ['custom_request', 'Request'],
-              ['merch', 'Merch'],
-            ] as const).map(([view, label]) => (
-              <button key={view} onClick={() => handleNav(view)} className="text-left px-3 py-2 rounded text-xs font-mono font-bold uppercase text-slate-300 hover:text-white hover:bg-slate-900">{label}</button>
-            ))}
             {canManageStore && <button onClick={() => handleNav('student_dashboard')} className="text-left px-3 py-2 rounded text-xs font-mono font-bold uppercase text-slate-300 hover:text-white hover:bg-slate-900">Workbench</button>}
             {currentUser && <button onClick={() => handleNav('my_requests')} className="text-left px-3 py-2 rounded text-xs font-mono font-bold uppercase text-slate-300 hover:text-white hover:bg-slate-900">Orders</button>}
             {canManageStore && <button onClick={() => handleNav('teacher_dashboard')} className="text-left px-3 py-2 rounded text-xs font-mono font-bold uppercase text-red-400 hover:bg-slate-900">Manage</button>}

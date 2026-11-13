@@ -136,8 +136,10 @@ interface LabContextType {
   removeClassStudent: (studentId: string) => Promise<void>;
   updateClassStudent: (studentId: string, updates: Partial<ClassStudent>) => Promise<void>;
 
-  // Admin Accounts Whitelist
+  // Admin Accounts: server-validated invitations, activation, and revocation
   adminWhitelist: string[];
+  adminAccountRecords: { email: string; status: string }[];
+  acceptAdminInvitation: (token: string) => Promise<void>;
   isWhitelistedAdminEmail: (email?: string | null) => boolean;
   addAdminEmail: (email: string) => Promise<void>;
   removeAdminEmail: (email: string) => Promise<void>;
@@ -198,6 +200,7 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [adminWhitelist, setAdminWhitelist] = useState<string[]>(loadInitialAdminWhitelist);
+  const [adminAccountRecords, setAdminAccountRecords] = useState<{ email: string; status: string }[]>([]);
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -440,29 +443,28 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       err => console.warn('Student applications subscription error:', err)
     ) : () => { setStudentApplications([]); };
 
-    // Fetch / Listen to Admin Whitelist
+    // Admin invitations are managed on the server; this Firestore listener only
+    // reads their public admin-dashboard display status.
     const unsubAdminWhitelist = currentUser && canManageAccounts ? onSnapshot(
       collection(db, 'admin_whitelist'),
       (snapshot) => {
-        if (!snapshot.empty) {
-          const list: string[] = [...BASELINE_ADMIN_WHITELIST];
-          snapshot.forEach((docSnap) => {
-            const data = docSnap.data();
-            if (data.email) {
-              list.push(data.email.trim().toLowerCase());
-            }
-          });
-          const unique = Array.from(new Set(list));
-          setAdminWhitelist(unique);
-          try {
-            localStorage.setItem('lab_admin_whitelist', JSON.stringify(unique));
-          } catch {}
+        const records = snapshot.docs.map(docSnap => ({
+          email: String(docSnap.data().email || '').trim().toLowerCase(),
+          status: String(docSnap.data().status || 'legacy'),
+        })).filter(row => row.email);
+        const byEmail = new Map<string, { email: string; status: string }>();
+        for (const record of records) {
+          const existing = byEmail.get(record.email);
+          if (!existing || record.status === 'active' || (existing.status !== 'active' && record.status === 'invited')) {
+            byEmail.set(record.email, record);
+          }
         }
+        setAdminAccountRecords([...byEmail.values()]);
+        const list = Array.from(new Set([...BASELINE_ADMIN_WHITELIST, ...byEmail.keys()]));
+        setAdminWhitelist(list);
       },
-      (err) => {
-        console.warn('Admin whitelist listener notice:', err);
-      }
-    ) : () => {};
+      (err) => console.warn('Admin account listing error:', err)
+    ) : () => { setAdminAccountRecords([]); };
 
     return () => {
       unsubListings();
@@ -1027,51 +1029,37 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  const addAdminEmail = async (email: string) => {
-    if (!canManageAccounts) throw new Error('Only admins can manage accounts.');
-    const clean = email.trim().toLowerCase();
-    if (!clean) throw new Error('Please enter a valid administrator email address.');
-    if (adminWhitelist.map((e) => e.toLowerCase()).includes(clean)) {
-      throw new Error(`Email ${clean} is already an authorized administrator.`);
-    }
-    const updated = [...adminWhitelist, clean];
-    setAdminWhitelist(updated);
-    try {
-      localStorage.setItem('lab_admin_whitelist', JSON.stringify(updated));
-    } catch {}
+  // Firebase role assignment must happen on a trusted server, never through
+  // localStorage, the client-side allowlist, or a browser Firestore write.
+  const adminApi = async (data: Record<string, unknown>): Promise<{message: string}> => {
+    if (!currentUser) throw new Error('Sign in before managing administrator access.');
+    const token = await currentUser.getIdToken();
+    const response = await fetch('/.netlify/functions/manage-admin-access', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(data),
+    });
+    const result = await response.json().catch(() => ({ error: `Server returned HTTP ${response.status}.` }));
+    if (!response.ok) throw new Error(result.error || `Server returned HTTP ${response.status}.`);
+    return result;
+  };
 
-    try {
-      await addDoc(collection(db, 'admin_whitelist'), {
-        email: clean,
-        addedAt: serverTimestamp(),
-        addedBy: currentUser?.email || 'admin',
-      });
-    } catch (err) {
-      console.warn('Could not persist admin email to Firestore:', err);
-    }
+  const addAdminEmail = async (email: string) => {
+    if (!canManageAccounts) throw new Error('Only administrators can send invitations.');
+    await adminApi({ action: 'invite', email: email.trim().toLowerCase() });
   };
 
   const removeAdminEmail = async (email: string) => {
-    if (!canManageAccounts) throw new Error('Only admins can manage accounts.');
-    const clean = email.trim().toLowerCase();
-    if (clean === BASELINE_ADMIN_WHITELIST[0].toLowerCase()) {
-      throw new Error(`The primary root administrator (${BASELINE_ADMIN_WHITELIST[0]}) cannot be removed.`);
-    }
-    const updated = adminWhitelist.filter((e) => e.toLowerCase() !== clean);
-    setAdminWhitelist(updated);
-    try {
-      localStorage.setItem('lab_admin_whitelist', JSON.stringify(updated));
-    } catch {}
+    if (!canManageAccounts) throw new Error('Only administrators can revoke administrator access.');
+    await adminApi({ action: 'revoke', email: email.trim().toLowerCase() });
+  };
 
-    try {
-      const q = query(collection(db, 'admin_whitelist'), where('email', '==', clean));
-      const snaps = await getDocs(q);
-      snaps.forEach(async (d) => {
-        await deleteDoc(doc(db, 'admin_whitelist', d.id));
-      });
-    } catch (err) {
-      console.warn('Could not remove admin email from Firestore:', err);
-    }
+  const acceptAdminInvitation = async (token: string) => {
+    await adminApi({ action: 'accept', token });
+    if (!currentUser) throw new Error('Sign in to activate admin access.');
+    const updated = await getDoc(doc(db, 'users', currentUser.uid));
+    if (!updated.exists()) throw new Error('Admin activation succeeded but your user profile could not be loaded. Sign in again.');
+    setUserProfile(updated.data() as UserProfile);
   };
 
   return (
@@ -1147,6 +1135,8 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         removeClassStudent,
         updateClassStudent,
         adminWhitelist,
+        adminAccountRecords,
+        acceptAdminInvitation,
         isWhitelistedAdminEmail,
         addAdminEmail,
         removeAdminEmail,
