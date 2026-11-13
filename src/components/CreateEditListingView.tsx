@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
-import { ArrowLeft, Plus, Trash2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { ArrowLeft, Plus, Trash2, AlertCircle, CheckCircle2, ImagePlus } from 'lucide-react';
 import { useLab } from '../context/LabContext';
 import { Category, ListingSizeOption, MaterialType } from '../types';
 import { isMerchListing } from '../lib/listingKinds';
+import { LISTING_IMAGE_ACCEPT, uploadListingImage, validateListingImage } from '../lib/listingImageUpload';
 
 const categories: Category[] = [
   'Desk Accessories', 'Robotics', 'Decorations', 'Games', 'Toys', 'Woodwork',
@@ -12,7 +13,38 @@ const materials: MaterialType[] = ['PLA', 'PLA+', 'PETG', 'TPU', 'ABS', 'Resin']
 const field = 'w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-red-600 focus:outline-none';
 const label = 'block mb-1 text-xs font-bold text-slate-700';
 const split = (value: string) => [...new Set(value.split(',').map(x => x.trim()).filter(Boolean))];
-const validUrl = (value: string) => { try { return ['http:', 'https:'].includes(new URL(value).protocol); } catch { return false; } };
+
+// Shows the current photo (saved URL or newly picked file) with Choose/Remove buttons.
+const PhotoField: React.FC<{
+  id: string; title: string; required?: boolean; savedUrl: string; file: File | null;
+  onPick: (file: File) => void; onRemove: () => void;
+}> = ({ id, title, required, savedUrl, file, onPick, onRemove }) => {
+  const [preview, setPreview] = useState('');
+  useEffect(() => {
+    if (!file) { setPreview(''); return; }
+    const url = URL.createObjectURL(file);
+    setPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+  const shown = preview || savedUrl;
+  return <div>
+    <span className={label}>{title}{required ? ' *' : ' (optional)'}</span>
+    <div className="flex items-center gap-3">
+      <div className="h-28 w-36 shrink-0 rounded border border-dashed border-slate-300 bg-slate-50 overflow-hidden flex items-center justify-center">
+        {shown ? <img src={shown} alt={`${title} preview`} className="h-full w-full object-cover"/> : <ImagePlus size={28} className="text-slate-400" aria-hidden="true"/>}
+      </div>
+      <div className="flex flex-col gap-2">
+        <label htmlFor={id} className="cursor-pointer rounded bg-slate-900 px-3 py-2 text-xs font-bold text-white text-center hover:bg-slate-700">
+          {shown ? 'Change photo' : 'Choose photo'}
+        </label>
+        <input id={id} type="file" accept={LISTING_IMAGE_ACCEPT} className="sr-only"
+          onChange={e => { const picked = e.target.files?.[0]; if (picked) onPick(picked); e.target.value = ''; }}/>
+        {shown && !required && <button type="button" onClick={onRemove} className="rounded border border-red-200 px-3 py-2 text-xs font-bold text-red-700">Remove</button>}
+        {file && <span className="text-[11px] text-slate-500 max-w-[10rem] truncate" title={file.name}>New: {file.name}</span>}
+      </div>
+    </div>
+  </div>;
+};
 
 export const CreateEditListingView: React.FC = () => {
   const { currentUser, userProfile, canPublishModel, editingListingId, listings,
@@ -42,6 +74,8 @@ export const CreateEditListingView: React.FC = () => {
   const [otherOptions, setOtherOptions] = useState(existing?.availableOptions?.join(', ') || '');
   const [imageUrl, setImageUrl] = useState(existing?.imageUrl || '');
   const [secondaryImageUrl, setSecondaryImageUrl] = useState(existing?.secondaryImageUrl || '');
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [secondaryImageFile, setSecondaryImageFile] = useState<File | null>(null);
   const [orderInstructions, setOrderInstructions] = useState(existing?.orderInstructions || '');
   const [turnaround, setTurnaround] = useState(existing?.estimatedProductionTime || '');
   const [priceType, setPriceType] = useState<'fixed' | 'quote'>(existing?.priceType || 'quote');
@@ -51,6 +85,13 @@ export const CreateEditListingView: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [savingStep, setSavingStep] = useState('');
+  const pickPhoto = (setter: (file: File) => void) => (file: File) => {
+    const problem = validateListingImage(file);
+    if (problem) { setError(problem); return; }
+    setError('');
+    setter(file);
+  };
   const editSize = (index: number, key: keyof ListingSizeOption, value: string) => {
     setSizeOptions(prev => prev.map((x, i) => i === index ? {
       ...x, [key]: key === 'price' ? (value === '' ? undefined : Number(value)) : value,
@@ -63,8 +104,7 @@ export const CreateEditListingView: React.FC = () => {
     setError(''); setSuccess('');
     if (!currentUser || !canPublishModel) { setError('Only approved staff and class students can manage listings.'); return; }
     if (!title.trim() || !description.trim()) { setError('Product name and description are required.'); return; }
-    if (!validUrl(imageUrl)) { setError('Add a valid public image URL starting with https://.'); return; }
-    if (secondaryImageUrl && !validUrl(secondaryImageUrl)) { setError('The second image URL must be valid.'); return; }
+    if (!imageFile && !imageUrl.trim()) { setError('Add a main product photo.'); return; }
     if (!split(availableColors).length) { setError('Enter at least one available color or finish.'); return; }
     if (!print && !otherMaterial.trim()) { setError('Enter the fabric or wood material.'); return; }
     if (merch && !split(merchSizes).length) { setError('Enter the available clothing sizes.'); return; }
@@ -87,6 +127,19 @@ export const CreateEditListingView: React.FC = () => {
     }
     setLoading(true);
     try {
+      // Upload newly chosen photos first; keep the saved photo when none was picked.
+      let mainPhoto = imageUrl.trim();
+      let extraPhoto = secondaryImageUrl.trim();
+      if (imageFile || secondaryImageFile) setSavingStep('Uploading photos...');
+      if (imageFile) {
+        mainPhoto = await uploadListingImage(imageFile);
+        setImageUrl(mainPhoto); setImageFile(null);
+      }
+      if (secondaryImageFile) {
+        extraPhoto = await uploadListingImage(secondaryImageFile);
+        setSecondaryImageUrl(extraPhoto); setSecondaryImageFile(null);
+      }
+      setSavingStep('Saving...');
       const name = title.trim();
       const payload = {
         title: name, name, description: description.trim(),
@@ -102,7 +155,7 @@ export const CreateEditListingView: React.FC = () => {
         stockQuantity: stockTracked ? Number(stockQuantity) : null,
         availableOptions: split(otherOptions),
         estimatedProductionTime: turnaround.trim(),
-        imageUrl: imageUrl.trim(), secondaryImageUrl: secondaryImageUrl.trim(),
+        imageUrl: mainPhoto, secondaryImageUrl: extraPhoto,
         orderInstructions: orderInstructions.trim(),
         // Preserve any older, internal slicing fields without asking staff for irrelevant data.
         specs: {
@@ -120,7 +173,7 @@ export const CreateEditListingView: React.FC = () => {
       else await createListing(payload);
       setSuccess(editingListingId ? 'Listing updated successfully.' : 'Listing published successfully.');
     } catch (err: any) { setError(err?.message || 'Could not save listing.'); }
-    finally { setLoading(false); }
+    finally { setLoading(false); setSavingStep(''); }
   };
 
   if (!currentUser || !canPublishModel) return <div className="mx-auto max-w-xl rounded-lg border bg-white p-8 text-center space-y-4">
@@ -147,10 +200,12 @@ export const CreateEditListingView: React.FC = () => {
         </div>
         <div><label htmlFor="listing-description" className={label}>Item description *</label><textarea id="listing-description" required rows={3} maxLength={2500} value={description} onChange={e=>setDescription(e.target.value)} className={field} placeholder="What is the item? What can it be used for?"/></div>
         <div className="grid sm:grid-cols-2 gap-4">
-          <div><label htmlFor="listing-image" className={label}>Main product photo URL *</label><input id="listing-image" required type="url" value={imageUrl} onChange={e=>setImageUrl(e.target.value)} className={field} placeholder="https://..."/></div>
-          <div><label htmlFor="listing-image-two" className={label}>Additional photo URL (optional)</label><input id="listing-image-two" type="url" value={secondaryImageUrl} onChange={e=>setSecondaryImageUrl(e.target.value)} className={field} placeholder="https://..."/></div>
+          <PhotoField id="listing-image" title="Main product photo" required savedUrl={imageUrl} file={imageFile}
+            onPick={pickPhoto(setImageFile)} onRemove={() => { setImageFile(null); setImageUrl(''); }}/>
+          <PhotoField id="listing-image-two" title="Additional photo" savedUrl={secondaryImageUrl} file={secondaryImageFile}
+            onPick={pickPhoto(setSecondaryImageFile)} onRemove={() => { setSecondaryImageFile(null); setSecondaryImageUrl(''); }}/>
         </div>
-        {imageUrl && validUrl(imageUrl) && <img src={imageUrl} alt="Product photo preview" className="h-32 w-44 rounded object-cover border"/>}
+        <p className="text-xs text-slate-500">JPG, PNG, or WebP. Phone photos are resized automatically. Photos upload when you save.</p>
       </section>
       <section className="space-y-4">
         <h2 className="font-extrabold text-base border-b pb-2">2. Customer choices</h2>
@@ -189,7 +244,7 @@ export const CreateEditListingView: React.FC = () => {
       </section>
       <div className="flex justify-end gap-3 border-t pt-5">
         <button type="button" onClick={()=>navigateTo('student_dashboard')} className="px-5 py-2 rounded border font-bold text-sm">Cancel</button>
-        <button type="submit" disabled={loading} className="px-5 py-2 rounded bg-[#C41E3A] text-white font-bold text-sm disabled:opacity-60">{loading ? 'Saving...' : existing ? 'Save changes' : 'Publish product'}</button>
+        <button type="submit" disabled={loading} className="px-5 py-2 rounded bg-[#C41E3A] text-white font-bold text-sm disabled:opacity-60">{loading ? (savingStep || 'Saving...') : existing ? 'Save changes' : 'Publish product'}</button>
       </div>
     </form>
   </div>;

@@ -17,7 +17,7 @@ import { FirebaseConfigBanner } from './components/FirebaseConfigBanner';
 import { Footer } from './components/Footer';
 
 export function App() {
-  const { activeView } = useLab();
+  const { activeView, editingListingId } = useLab();
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col font-sans antialiased selection:bg-[#C41E3A] selection:text-white">
@@ -40,7 +40,8 @@ export function App() {
         {activeView === 'my_requests' && <MyRequestsView />}
         {activeView === 'maker_profile' && <StudentMakerProfileView />}
         {(activeView === 'create_listing' || activeView === 'edit_listing') && (
-          <CreateEditListingView />
+          // Remount per listing so the form never shows another product's data.
+          <CreateEditListingView key={activeView === 'edit_listing' ? `edit-${editingListingId}` : 'create'} />
         )}
       </main>
 

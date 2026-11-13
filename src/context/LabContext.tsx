@@ -623,6 +623,9 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (params?.productId) setSelectedProductId(params.productId);
     if (params?.makerId) setSelectedMakerId(params.makerId);
     if (params?.listingId) setEditingListingId(params.listingId);
+    // Creating a product must never reuse the listing that was edited last,
+    // otherwise "Publish" would overwrite that existing product.
+    if (view === 'create_listing') setEditingListingId(null);
     setActiveView(view);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };

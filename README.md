@@ -16,6 +16,8 @@ Online store and custom-print request portal for the Hueneme High School Robotic
 | `firestore.rules`, `storage.rules` | Database / file security rules. |
 | `functions/` | Optional Firebase Cloud Functions (email alerts; needs Blaze plan). |
 
+**Product photos** are uploaded from the Add/Edit Product form, resized in the browser (max 1600px), and stored in **Netlify Blobs** (store `listing-images`) by `netlify/functions/listing-image-upload.mjs`. Only admins/teachers/approved class students can upload. Photos are served by `/.netlify/functions/listing-image?key=...`. No Firebase Storage needed. (CAD request photos still use Firebase Storage.)
+
 ## What deploys where
 
 | Change | How it goes live |
