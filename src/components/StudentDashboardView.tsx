@@ -37,6 +37,8 @@ export const StudentDashboardView: React.FC = () => {
   } = useLab();
 
   const [activeTab, setActiveTab] = useState<'listings' | 'requests' | 'orders'>('listings');
+  // Staff share one store: show every product by default, with an option to see only your own.
+  const [onlyMine, setOnlyMine] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
 
@@ -47,6 +49,7 @@ export const StudentDashboardView: React.FC = () => {
       (l) => l.creatorId === currentUser.uid || l.makerId === currentUser.uid
     );
   }, [listings, currentUser]);
+  const shownListings = onlyMine ? myListings : listings;
 
   // Filter incoming orders for items this student created
   const incomingOrders = useMemo(() => {
@@ -181,7 +184,7 @@ export const StudentDashboardView: React.FC = () => {
           }`}
         >
           <Layers className="w-3.5 h-3.5" />
-          <span>My Listings ({myListings.length})</span>
+          <span>Store Products ({listings.length})</span>
         </button>
 
         <button
@@ -212,7 +215,18 @@ export const StudentDashboardView: React.FC = () => {
       {/* Tab: My Listings */}
       {activeTab === 'listings' && (
         <div className="space-y-4">
-          {myListings.length === 0 ? (
+          {listings.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 text-xs" role="group" aria-label="Which products to show">
+              <span className="font-bold text-slate-600">Show:</span>
+              {([['All store products', false, listings.length], ['Only mine', true, myListings.length]] as const).map(([text, mine, count]) => (
+                <button key={text} type="button" aria-pressed={onlyMine === mine} onClick={() => setOnlyMine(mine)}
+                  className={`px-3 py-1.5 rounded border font-bold ${onlyMine === mine ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
+                  {text} ({count})
+                </button>
+              ))}
+            </div>
+          )}
+          {shownListings.length === 0 ? (
             <div className="bg-white rounded border border-slate-200 p-12 text-center space-y-4 shadow-xs">
               <div className="w-12 h-12 rounded bg-slate-100 flex items-center justify-center mx-auto text-slate-500">
                 <Layers className="w-6 h-6" />
@@ -241,7 +255,7 @@ export const StudentDashboardView: React.FC = () => {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {myListings.map((listing) => (
+              {shownListings.map((listing) => (
                 <div
                   key={listing.id}
                   className="bg-white rounded border border-slate-200 p-4 flex flex-col justify-between space-y-4 shadow-xs"
