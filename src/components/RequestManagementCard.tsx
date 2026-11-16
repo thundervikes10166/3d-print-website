@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronDown, ChevronUp, History, Save, ArrowLeft, ArrowRight, Pencil } from 'lucide-react';
+import { ChevronDown, ChevronUp, History, Save, ArrowLeft, ArrowRight, Pencil, Trash2 } from 'lucide-react';
 import { CustomRequest, RequestStatus } from '../types';
 import { RequestNotesPanel } from './RequestNotesPanel';
 import { RequestReferenceAttachments } from './RequestReferenceAttachments';
@@ -15,9 +15,11 @@ interface Props {
   onChangeStage: (id: string, status: RequestStatus, note?: string) => Promise<void>;
   onSaveDetails: (id: string, updates: Partial<CustomRequest>) => Promise<void>;
   onAddNote: (id: string, text: string) => Promise<void>;
+  /** Only passed for administrators. */
+  onDelete?: (id: string) => Promise<void>;
 }
 
-export const RequestManagementCard: React.FC<Props> = ({request,processing,onChangeStage,onSaveDetails,onAddNote}) => {
+export const RequestManagementCard: React.FC<Props> = ({request,processing,onChangeStage,onSaveDetails,onAddNote,onDelete}) => {
   const [open,setOpen] = useState(false);
   const [editing,setEditing] = useState(false);
   const [history,setHistory] = useState(false);
@@ -25,6 +27,13 @@ export const RequestManagementCard: React.FC<Props> = ({request,processing,onCha
   const [draft,setDraft] = useState<Partial<CustomRequest>>({});
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState<string | null>(null);
+  const [confirmDelete,setConfirmDelete] = useState(false);
+  const removeRequest = async () => {
+    if (!onDelete) return;
+    setBusy(true);setError(null);
+    try {await onDelete(request.id);}
+    catch(e:any){setError(e.message || 'Could not delete the request.');setConfirmDelete(false);setBusy(false);}
+  };
   const previous = previousRequestStatus(request.status);
   const next = nextRequestStatus(request.status);
   useEffect(() => { if (!editing) setDraft({
@@ -107,6 +116,21 @@ export const RequestManagementCard: React.FC<Props> = ({request,processing,onCha
           {(request.editLog||[]).slice().reverse().map((entry,i)=><div key={`edit-${i}`} className="border-l-2 border-blue-200 pl-3"><strong>Edited {entry.fields.join(', ')}</strong><span className="block text-slate-500">{displayRequestDateTime(entry.timestamp)} · {entry.changedByName}</span></div>)}
         </div>}
       </div>
+      {onDelete && <div className="border-t border-slate-200 pt-3">
+        {!confirmDelete ? (
+          <button type="button" disabled={processing||busy} onClick={()=>setConfirmDelete(true)} className="flex items-center gap-1.5 text-xs font-bold text-red-700 border border-red-200 bg-white hover:bg-red-50 px-3 py-2 rounded disabled:opacity-50">
+            <Trash2 className="w-4 h-4"/>Delete request
+          </button>
+        ) : (
+          <div role="alertdialog" aria-label="Confirm deletion" className="bg-red-50 border border-red-300 rounded p-3 space-y-2">
+            <p className="text-xs text-red-900"><strong>Permanently delete {request.ticketNumber || 'this request'} ({request.itemTitle || 'untitled'})?</strong> This removes the request, its staff notes and stage history for everyone, including the customer. It cannot be undone.</p>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" disabled={busy} onClick={removeRequest} className="bg-red-700 hover:bg-red-800 text-white px-3 py-2 rounded text-xs font-bold disabled:opacity-50">{busy?'Deleting...':'Yes, delete permanently'}</button>
+              <button type="button" disabled={busy} onClick={()=>setConfirmDelete(false)} className="border border-slate-300 bg-white px-3 py-2 rounded text-xs font-bold">Cancel</button>
+            </div>
+          </div>
+        )}
+      </div>}
     </div>}
   </article>;
 };

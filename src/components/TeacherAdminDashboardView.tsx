@@ -14,7 +14,7 @@ export const TeacherAdminDashboardView:React.FC=()=>{
   const lab=useLab();
   const {currentUser,isAdminWhitelisted,canManageStore,canManageAccounts,setShowAuthModal,
     listings,orders,requests,categories,classStudents,studentApplications,adminWhitelist,adminAccountRecords,
-    navigateTo,approveListing,deleteListing,updateRequestStatus,updateRequestDetails,addRequestNote,
+    navigateTo,approveListing,deleteListing,updateRequestStatus,updateRequestDetails,addRequestNote,deleteRequest,
     updateOrderStatus,updateOrderDetails,addCategory,deleteCategory,
     approveStudentApplication,rejectStudentApplication,addClassStudent,removeClassStudent,
     updateClassStudent,addAdminEmail,removeAdminEmail}=lab;
@@ -88,7 +88,8 @@ export const TeacherAdminDashboardView:React.FC=()=>{
       {visibleRequests.length?visibleRequests.map(request=><RequestManagementCard key={request.id} request={request} processing={busy}
         onChangeStage={(id,status,note)=>run(()=>updateRequestStatus(id,status,note),'Custom request stage updated and recorded.')}
         onSaveDetails={(id,updates)=>run(()=>updateRequestDetails(id,updates),'Custom request details saved.')}
-        onAddNote={(id,note)=>run(()=>addRequestNote(id,note),'Internal staff note saved.')}/>):<p className="bg-white p-8 border border-slate-200 rounded text-sm text-slate-500 text-center">No {cadQueue} custom print requests.</p>}
+        onAddNote={(id,note)=>run(()=>addRequestNote(id,note),'Internal staff note saved.')}
+        onDelete={canManageAccounts?async id=>{const message=await deleteRequest(id);setError(null);setNotice(message);}:undefined}/>):<p className="bg-white p-8 border border-slate-200 rounded text-sm text-slate-500 text-center">No {cadQueue} custom print requests.</p>}
     </section>}
     {activeTab==='catalog'&&<section className="space-y-3">
       <div className="bg-white border border-slate-200 rounded p-4 flex items-center justify-between gap-4"><div><h2 className="text-base font-extrabold">Shop Catalog</h2><p className="text-xs text-slate-600">Approved Class Students and admins can add, edit and remove products.</p></div><button className={`${primary} px-4 py-2 rounded text-xs font-bold`} onClick={()=>navigateTo('create_listing')}>+ Add product</button></div>

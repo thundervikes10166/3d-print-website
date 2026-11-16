@@ -114,6 +114,7 @@ interface LabContextType {
   addRequestNote: (requestId: string, note: string) => Promise<void>;
   updateRequestDetails: (requestId: string, updates: Partial<CustomRequest>) => Promise<void>;
   assignMakerToRequest: (requestId: string, makerId: string, makerName: string) => Promise<void>;
+  deleteRequest: (requestId: string) => Promise<string>;
 
   // Firestore Operations (Orders)
   createOrder: (orderData: Omit<Order, 'id' | 'createdAt' | 'status'>) => Promise<string>;
@@ -1047,6 +1048,28 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return result;
   };
 
+  // Permanent deletion runs on the server (admins only) so the request's
+  // private staff notes are removed too and an audit record is kept.
+  const deleteRequest = async (requestId: string): Promise<string> => {
+    if (!currentUser || !canManageAccounts) throw new Error('Only administrators can delete requests.');
+    const token = await currentUser.getIdToken();
+    let response: Response;
+    try {
+      response = await fetch('/.netlify/functions/delete-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ requestId }),
+      });
+    } catch {
+      throw new Error('Could not reach the server. Check your connection and try again.');
+    }
+    const result = await response.json().catch(() => ({ error: `Server returned HTTP ${response.status}.` }));
+    if (!response.ok) throw new Error(result.error || `Server returned HTTP ${response.status}.`);
+    // The live Firestore listener drops the request; remove it now too.
+    setRequests((current) => current.filter((item) => item.id !== requestId));
+    return result.message || 'Request deleted.';
+  };
+
   const addAdminEmail = async (email: string) => {
     if (!canManageAccounts) throw new Error('Only administrators can send invitations.');
     await adminApi({ action: 'invite', email: email.trim().toLowerCase() });
@@ -1122,6 +1145,7 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addRequestNote,
         updateRequestDetails,
         assignMakerToRequest,
+        deleteRequest,
         createOrder,
         updateOrderStatus,
         updateOrderDetails,
