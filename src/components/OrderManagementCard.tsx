@@ -39,11 +39,11 @@ export const OrderManagementCard:React.FC<Props>=({order,processing,onChangeStag
         <div><strong className="block text-[10px] text-slate-500 uppercase">Color</strong>{order.selectedColor||'Standard'}</div>
         {order.selectedOption && <div><strong className="block text-[10px] text-slate-500 uppercase">Option</strong>{order.selectedOption}</div>}
         {order.selectedSize && <div><strong className="block text-[10px] text-slate-500 uppercase">Size</strong>{order.selectedSize}</div>}
-        <div><strong className="block text-[10px] text-slate-500 uppercase">Quoted price</strong>{order.isQuoteRequest?'Estimate required':`$${(order.priceAtTimeOfOrder * order.quantity).toFixed(2)}`}</div>
+        <div><strong className="block text-[10px] text-slate-500 uppercase">Price</strong>{order.isQuoteRequest||!(order.priceAtTimeOfOrder>0)?'No set price (older product)':`$${order.priceAtTimeOfOrder.toFixed(2)} × ${order.quantity} = $${(order.priceAtTimeOfOrder * order.quantity).toFixed(2)}`}</div>
         <div><strong className="block text-[10px] text-slate-500 uppercase">Pickup</strong>{order.pickupLocation||'Room Q10'}</div>
       </div>
       {order.isQuoteRequest && <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-        <strong>Estimate / confirmation required:</strong> Contact this customer to confirm pricing and the order before fulfillment. When the item is ready, direct them to Hueneme High School, Room Q10.
+        <strong>Price needed:</strong> This product had no set price when ordered. Contact the customer to confirm the price before fulfillment. When the item is ready, direct them to Hueneme High School, Room Q10.
         {order.guestCheckout && <span className="block mt-1 font-semibold">Guest submission: no customer account is linked.</span>}
       </div>}
       {order.notes&&<p className="text-xs"><strong>Order notes:</strong> {order.notes}</p>}

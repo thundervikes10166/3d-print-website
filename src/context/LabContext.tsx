@@ -110,7 +110,8 @@ interface LabContextType {
 
   // Firestore Operations (Custom Requests)
   createCustomRequest: (requestData: Omit<CustomRequest, 'id' | 'ticketNumber' | 'createdAt' | 'status'>) => Promise<string>;
-  updateRequestStatus: (requestId: string, status: RequestStatus, note?: string) => Promise<void>;
+  /** Resolves to a note about the customer pickup email when moved to Ready. */
+  updateRequestStatus: (requestId: string, status: RequestStatus, note?: string) => Promise<string>;
   addRequestNote: (requestId: string, note: string) => Promise<void>;
   updateRequestDetails: (requestId: string, updates: Partial<CustomRequest>) => Promise<void>;
   assignMakerToRequest: (requestId: string, makerId: string, makerName: string) => Promise<void>;
@@ -118,7 +119,7 @@ interface LabContextType {
 
   // Firestore Operations (Orders)
   createOrder: (orderData: Omit<Order, 'id' | 'createdAt' | 'status'>) => Promise<string>;
-  updateOrderStatus: (orderId: string, status: OrderStatus, note?: string) => Promise<void>;
+  updateOrderStatus: (orderId: string, status: OrderStatus, note?: string) => Promise<string>;
   updateOrderDetails: (orderId: string, updates: Partial<Order>) => Promise<void>;
   confirmCashDeposit: (orderId: string, amount: number) => Promise<void>;
 
@@ -716,7 +717,36 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     const docRef = await addDoc(collection(db, 'requests'), newRequest);
+    // "We received your request" email. Never blocks or fails the submission.
+    void sendCustomerEmail('request', docRef.id, 'confirmation');
     return docRef.id;
+  };
+
+  // Automatic customer emails are sent by the `customer-email` Netlify function.
+  // Returns a short note for staff; never throws (the status change already saved).
+  const sendCustomerEmail = async (
+    kind: 'order' | 'request', id: string, type: 'confirmation' | 'ready'
+  ): Promise<string> => {
+    if (!currentUser) return '';
+    try {
+      const token = await currentUser.getIdToken();
+      const response = await fetch('/.netlify/functions/customer-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ kind, id, type }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) return `Customer email not sent: ${result.error || `HTTP ${response.status}`}`;
+      if (result.sent) return `Customer emailed at ${result.to}.`;
+      switch (result.reason) {
+        case 'already-sent': return 'The customer was already emailed about this.';
+        case 'no-email': return 'No customer email on file: contact them by phone.';
+        case 'not-configured': return 'Customer email not sent: email is not set up in Netlify yet.';
+        default: return `Customer email not sent: ${result.error || 'unknown problem'}.`;
+      }
+    } catch {
+      return 'Customer email not sent: could not reach the server.';
+    }
   };
 
   const ensureRequestEditor = (request: CustomRequest) => {
@@ -728,7 +758,7 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     requestId: string,
     status: RequestStatus,
     note?: string
-  ): Promise<void> => {
+  ): Promise<string> => {
     if (!currentUser) throw new Error('Authentication required.');
     const docRef = doc(db, 'requests', requestId);
     await runTransaction(db, async (transaction) => {
@@ -752,6 +782,7 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ];
       transaction.update(docRef, { status, statusLog: nextLog, updatedAt: serverTimestamp() });
     });
+    return status === 'ready' ? sendCustomerEmail('request', requestId, 'ready') : '';
   };
 
   const updateRequestDetails = async (requestId: string, updates: Partial<CustomRequest>): Promise<void> => {
@@ -848,7 +879,7 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return docRef.id;
   };
 
-  const updateOrderStatus = async (orderId: string, status: OrderStatus, note?: string) => {
+  const updateOrderStatus = async (orderId: string, status: OrderStatus, note?: string): Promise<string> => {
     if (!currentUser || !canManageStore) throw new Error('Approved staff access required.');
     await runTransaction(db, async transaction => {
       const ref = doc(db, 'orders', orderId);
@@ -872,6 +903,7 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updatedAt: serverTimestamp(),
       });
     });
+    return status === 'ready' ? sendCustomerEmail('order', orderId, 'ready') : '';
   };
 
   const updateOrderDetails = async (orderId: string, updates: Partial<Order>): Promise<void> => {

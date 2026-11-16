@@ -7,6 +7,8 @@ const crypto = require('node:crypto');
 const { initializeApp, getApps, cert } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+const mailer = require('../lib/mailer.cjs');
+const { confirmationEmail } = require('../lib/customerEmails.cjs');
 
 const reply = (statusCode, data) => ({
   statusCode,
@@ -25,10 +27,10 @@ function firebaseServices() {
   return { db: getFirestore(), auth: getAuth() };
 }
 
+const money = (value) => `$${Number(value).toFixed(2)}`;
+
 async function notifyAdmin(db, orderId, order) {
-  const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.NOTIFICATION_FROM_EMAIL;
-  if (!apiKey || !from) return;
+  if (!mailer.emailProvider()) return;
 
   const recipients = new Set([
     'thundervikes10166@gmail.com',
@@ -45,7 +47,7 @@ async function notifyAdmin(db, orderId, order) {
   }
 
   const body = [
-    'New Thunder Vikes shop estimate request',
+    'New Thunder Vikes shop purchase request',
     `Request: #${orderId.slice(0, 8).toUpperCase()}`,
     `Product: ${order.listingTitle}`,
     `Customer: ${order.buyerDisplayName}`,
@@ -57,17 +59,22 @@ async function notifyAdmin(db, orderId, order) {
     `Size: ${order.selectedSize || '(not applicable)'}`,
     `Other option: ${order.selectedOption || '(not applicable)'}`,
     `Material: ${order.selectedMaterial}`,
+    `Price: ${order.priceAtTimeOfOrder > 0 ? `${money(order.priceAtTimeOfOrder)} each, total ${money(order.priceAtTimeOfOrder * order.quantity)}` : 'No price set on this product'}`,
     `Notes: ${order.notes || '(none)'}`,
     '',
-    'This is a REQUEST, not permission to start fulfillment. Contact the customer to confirm the estimate and order before preparation.',
+    order.contactEmail ? 'The customer was sent an automatic confirmation email (we will reach out within 2 business days).' : 'The customer gave no email: contact them by phone within 2 business days.',
+    'Confirm the order with the customer before preparing it.',
     'Once complete and ready for pickup, direct them to Hueneme High School, Room Q10.',
   ].join('\n');
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from, to: [...recipients], subject: `New shop estimate: ${order.listingTitle}`, text: body }),
-  });
-  if (!response.ok) throw new Error(`Resend returned HTTP ${response.status}`);
+  await mailer.sendEmail({ to: [...recipients], subject: `New shop purchase request: ${order.listingTitle}`, text: body });
+}
+
+// "We received your request" email to the customer (sent once per order).
+async function confirmCustomer(orderRef, order) {
+  if (!order.contactEmail || !mailer.emailProvider()) return false;
+  await mailer.sendEmail({ to: order.contactEmail, ...confirmationEmail('order', order, orderRef.id) });
+  await orderRef.update({ confirmationEmailSentAt: FieldValue.serverTimestamp(), confirmationEmailSentAtTo: order.contactEmail });
+  return true;
 }
 
 exports.handler = async (event) => {
@@ -150,6 +157,9 @@ exports.handler = async (event) => {
     const ipHash = crypto.createHmac('sha256', accountSecret).update(remoteIp).digest('hex');
     const rateRef = db.collection('guest_order_rate_limits').doc(ipHash);
     const orderRef = db.collection('orders').doc();
+    const variantPrice = selectedVariant && typeof selectedVariant.price === 'number' && selectedVariant.price > 0 ? selectedVariant.price : null;
+    const basePrice = Number(listing.price || listing.priceAmount || 0);
+    const unitPrice = Math.round((variantPrice ?? (Number.isFinite(basePrice) ? basePrice : 0)) * 100) / 100;
     const now = Date.now();
     const timestamp = new Date(now).toISOString();
     const guest = !buyerUid;
@@ -168,20 +178,20 @@ exports.handler = async (event) => {
       listingTitle: listing.title || listing.name || '3D printed item',
       listingImageUrl: listing.imageUrl || '',
       quantity,
-      priceAtTimeOfOrder: listing.priceType === 'fixed' && selectedVariant && typeof selectedVariant.price === 'number'
-        ? selectedVariant.price : Number(listing.price || listing.priceAmount || 0),
+      // Every shop product has a set price: a size-specific price wins, else the product price.
+      priceAtTimeOfOrder: unitPrice,
       selectedColor,
       selectedSize,
       selectedOption,
       selectedMaterial: listing.material || 'PLA',
       notes,
-      isQuoteRequest: true,
+      isQuoteRequest: !(unitPrice > 0), // only older products without a price need a quote
       guestCheckout: guest,
       pickupLocation: 'Hueneme High School, Room Q10',
       status: 'requested',
       statusLog: [{
         status: 'requested', timestamp,
-        note: 'Estimate request submitted. Awaiting manual confirmation before printing.',
+        note: 'Purchase request submitted. Awaiting confirmation before preparing.',
         changedByUid: buyerUid || 'guest', changedByName: `${firstName} ${lastName}`, changedByEmail: contactEmail,
       }],
       createdAt: FieldValue.serverTimestamp(),
@@ -199,10 +209,11 @@ exports.handler = async (event) => {
       transaction.create(orderRef, order);
     });
 
-    // Never fail the customer's successfully-saved order because an email provider is offline.
-    try { await notifyAdmin(db, orderRef.id, order); }
-    catch (error) { console.error('Admin email notification failed:', error); }
-    return reply(201, { orderId: orderRef.id });
+    // Never fail the customer's successfully-saved order because email is down.
+    const [admin, customer] = await Promise.allSettled([notifyAdmin(db, orderRef.id, order), confirmCustomer(orderRef, order)]);
+    if (admin.status === 'rejected') console.error('Admin email notification failed:', admin.reason?.message || admin.reason);
+    if (customer.status === 'rejected') console.error('Customer confirmation email failed:', customer.reason?.message || customer.reason);
+    return reply(201, { orderId: orderRef.id, confirmationEmailSent: customer.status === 'fulfilled' && customer.value === true });
   } catch (error) {
     if (error.code === 'RATE_LIMIT') return reply(429, { error: error.message });
     console.error('Public shop estimate submission error:', error);

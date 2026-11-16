@@ -5,10 +5,23 @@ import { Category, ListingSizeOption, MaterialType } from '../types';
 import { isMerchListing } from '../lib/listingKinds';
 import { LISTING_IMAGE_ACCEPT, uploadListingImage, validateListingImage } from '../lib/listingImageUpload';
 
-const categories: Category[] = [
-  'Desk Accessories', 'Robotics', 'Decorations', 'Games', 'Toys', 'Woodwork',
-  'T-Shirts', 'Hats', 'Hoodies', 'Other Merch', 'Other',
+// What is being listed decides which categories, materials and size choices apply.
+type ProductKind = 'print' | 'merch' | 'wood';
+const KINDS: { value: ProductKind; title: string; detail: string }[] = [
+  { value: 'print', title: '3D Print', detail: 'Printed parts, robotics, decor, toys' },
+  { value: 'merch', title: 'Clothing & Merch', detail: 'T-shirts, hoodies, hats (with sizes)' },
+  { value: 'wood', title: 'Woodwork', detail: 'Wood projects made in the lab' },
 ];
+const CATEGORIES: Record<ProductKind, Category[]> = {
+  print: ['Robotics', 'Desk Accessories', 'Decorations', 'Games', 'Toys', 'Other'],
+  merch: ['T-Shirts', 'Hoodies', 'Hats', 'Other Merch'],
+  wood: ['Woodwork'],
+};
+const categories: Category[] = [...CATEGORIES.print, ...CATEGORIES.merch, ...CATEGORIES.wood];
+const kindOf = (category: string): ProductKind =>
+  isMerchListing(category) ? 'merch' : category === 'Woodwork' ? 'wood' : 'print';
+// Common clothing sizes shown as tick-boxes; staff can add any other size.
+const CLOTHING_SIZES = ['Youth S', 'Youth M', 'Youth L', 'XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', 'One Size'];
 const materials: MaterialType[] = ['PLA', 'PLA+', 'PETG', 'TPU', 'ABS', 'Resin'];
 const field = 'w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-red-600 focus:outline-none';
 const label = 'block mb-1 text-xs font-bold text-slate-700';
@@ -55,6 +68,8 @@ export const CreateEditListingView: React.FC = () => {
   const [category, setCategory] = useState<Category>(
     categories.includes(existing?.category as Category) ? existing!.category as Category : 'Robotics'
   );
+  const kind = kindOf(category);
+  const chooseKind = (next: ProductKind) => { if (next !== kind) setCategory(CATEGORIES[next][0]); };
   const merch = isMerchListing(category);
   const wood = category === 'Woodwork';
   const print = !merch && !wood;
@@ -64,7 +79,20 @@ export const CreateEditListingView: React.FC = () => {
   const [otherMaterial, setOtherMaterial] = useState(
     existing && (isMerchListing(existing) || existing.category === 'Woodwork') ? existing.material : ''
   );
-  const [merchSizes, setMerchSizes] = useState(existing?.merchSizes?.join(', ') || '');
+  const [merchSizes, setMerchSizes] = useState<string[]>(existing?.merchSizes || []);
+  const [customSize, setCustomSize] = useState('');
+  // Keep sizes in a natural order: standard sizes first, then custom ones as added.
+  const orderSizes = (list: string[]) => [
+    ...CLOTHING_SIZES.filter(size => list.includes(size)),
+    ...list.filter(size => !CLOTHING_SIZES.includes(size)),
+  ];
+  const toggleSize = (size: string) => setMerchSizes(prev =>
+    orderSizes(prev.includes(size) ? prev.filter(x => x !== size) : [...prev, size]));
+  const addCustomSize = () => {
+    const size = customSize.trim().slice(0, 30);
+    if (size && !merchSizes.some(x => x.toLowerCase() === size.toLowerCase())) setMerchSizes(prev => orderSizes([...prev, size]));
+    setCustomSize('');
+  };
   const [sizeOptions, setSizeOptions] = useState<ListingSizeOption[]>(
     existing?.sizeOptions?.length ? existing.sizeOptions.map(x => ({ ...x })) :
     existing && existing.specs?.dimensions && !isMerchListing(existing) ?
@@ -78,8 +106,9 @@ export const CreateEditListingView: React.FC = () => {
   const [secondaryImageFile, setSecondaryImageFile] = useState<File | null>(null);
   const [orderInstructions, setOrderInstructions] = useState(existing?.orderInstructions || '');
   const [turnaround, setTurnaround] = useState(existing?.estimatedProductionTime || '');
-  const [priceType, setPriceType] = useState<'fixed' | 'quote'>(existing?.priceType || 'quote');
-  const [price, setPrice] = useState(String(existing?.price ?? existing?.priceAmount ?? ''));
+  // Every shop product has a set price (older "quote" products must get one when edited).
+  const existingPrice = Number(existing?.price ?? existing?.priceAmount ?? 0);
+  const [price, setPrice] = useState(existingPrice > 0 ? String(existingPrice) : '');
   const [stockTracked, setStockTracked] = useState(typeof existing?.stockQuantity === 'number');
   const [stockQuantity, setStockQuantity] = useState(String(existing?.stockQuantity ?? ''));
   const [loading, setLoading] = useState(false);
@@ -107,7 +136,7 @@ export const CreateEditListingView: React.FC = () => {
     if (!imageFile && !imageUrl.trim()) { setError('Add a main product photo.'); return; }
     if (!split(availableColors).length) { setError('Enter at least one available color or finish.'); return; }
     if (!print && !otherMaterial.trim()) { setError('Enter the fabric or wood material.'); return; }
-    if (merch && !split(merchSizes).length) { setError('Enter the available clothing sizes.'); return; }
+    if (merch && !merchSizes.length) { setError('Choose at least one clothing size customers can pick from.'); return; }
     if (stockTracked && (!/^\d+$/.test(stockQuantity) || Number(stockQuantity) > 100000)) {
       setError('Stock must be a whole number from 0 to 100,000.'); return;
     }
@@ -122,8 +151,13 @@ export const CreateEditListingView: React.FC = () => {
     if (sizes.some(x => 'price' in x && (x.price! < 0 || x.price! > 100000))) {
       setError('Size prices must be between $0 and $100,000.'); return;
     }
-    if (priceType === 'fixed' && (!Number.isFinite(Number(price)) || !price.trim() || Number(price) < 0)) {
-      setError('Enter a valid material price or select Custom quote.'); return;
+    const sizesAllPriced = !merch && sizes.length > 0 && sizes.every(x => typeof x.price === 'number' && x.price > 0);
+    const priceValue = Number(price);
+    if (price.trim() && (!Number.isFinite(priceValue) || priceValue <= 0 || priceValue > 100000)) {
+      setError('Enter a price greater than $0.00.'); return;
+    }
+    if (!price.trim() && !sizesAllPriced) {
+      setError('Enter the product price. Customers see this set price in the shop.'); return;
     }
     setLoading(true);
     try {
@@ -147,10 +181,12 @@ export const CreateEditListingView: React.FC = () => {
         creatorDisplayName: existing?.creatorDisplayName || userProfile?.displayName || currentUser.email || 'Student Maker',
         makerId: existing?.makerId || currentUser.uid,
         makerName: existing?.makerName || userProfile?.displayName || currentUser.email || 'Student Maker',
-        category, priceType, price: priceType === 'fixed' ? Number(price) : 0,
-        priceAmount: priceType === 'fixed' ? Number(price) : 0,
+        category, priceType: 'fixed' as const,
+        // When every size has its own price, the lowest one is the product price.
+        price: price.trim() ? Math.round(priceValue * 100) / 100 : Math.min(...sizes.map(x => x.price as number)),
+        priceAmount: price.trim() ? Math.round(priceValue * 100) / 100 : Math.min(...sizes.map(x => x.price as number)),
         material: print ? material : otherMaterial.trim(),
-        merchSizes: merch ? split(merchSizes) : [],
+        merchSizes: merch ? merchSizes : [],
         sizeOptions: merch ? [] : sizes,
         stockQuantity: stockTracked ? Number(stockQuantity) : null,
         availableOptions: split(otherOptions),
@@ -194,9 +230,19 @@ export const CreateEditListingView: React.FC = () => {
       {success && <p role="status" className="flex gap-2 text-sm bg-emerald-50 border border-emerald-200 p-3 rounded text-emerald-800"><CheckCircle2 size={18}/>{success}</p>}
       <section className="space-y-4">
         <h2 className="font-extrabold text-base border-b pb-2">1. Product information</h2>
+        <fieldset>
+          <legend className={label}>What are you listing? *</legend>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {KINDS.map(option => <label key={option.value} className={`cursor-pointer rounded-lg border p-3 ${kind === option.value ? 'border-red-600 bg-red-50 ring-1 ring-red-600' : 'border-slate-300 bg-white hover:border-slate-400'}`}>
+              <input type="radio" name="product-kind" value={option.value} checked={kind === option.value} onChange={() => chooseKind(option.value)} className="sr-only"/>
+              <span className="block text-sm font-extrabold text-slate-900">{option.title}</span>
+              <span className="block text-xs text-slate-500">{option.detail}</span>
+            </label>)}
+          </div>
+        </fieldset>
         <div className="grid sm:grid-cols-2 gap-4">
-          <div><label htmlFor="listing-name" className={label}>Item name *</label><input id="listing-name" required maxLength={120} value={title} onChange={e=>setTitle(e.target.value)} className={field} placeholder="Viking keychain"/></div>
-          <div><label htmlFor="listing-category" className={label}>Category *</label><select id="listing-category" value={category} onChange={e=>setCategory(e.target.value as Category)} className={field}>{categories.map(c=><option key={c}>{c}</option>)}</select></div>
+          <div><label htmlFor="listing-name" className={label}>Item name *</label><input id="listing-name" required maxLength={120} value={title} onChange={e=>setTitle(e.target.value)} className={field} placeholder={merch ? 'Thunder Vikes team T-shirt' : wood ? 'Engraved name plaque' : 'Viking keychain'}/></div>
+          {CATEGORIES[kind].length > 1 && <div><label htmlFor="listing-category" className={label}>Category *</label><select id="listing-category" value={category} onChange={e=>setCategory(e.target.value as Category)} className={field}>{CATEGORIES[kind].map(c=><option key={c}>{c}</option>)}</select></div>}
         </div>
         <div><label htmlFor="listing-description" className={label}>Item description *</label><textarea id="listing-description" required rows={3} maxLength={2500} value={description} onChange={e=>setDescription(e.target.value)} className={field} placeholder="What is the item? What can it be used for?"/></div>
         <div className="grid sm:grid-cols-2 gap-4">
@@ -215,13 +261,27 @@ export const CreateEditListingView: React.FC = () => {
               <input id="listing-material" className={field} required value={otherMaterial} onChange={e=>setOtherMaterial(e.target.value)} placeholder={merch ? 'Cotton / poly blend' : 'Pine / plywood / hardwood'}/>}</div>
           <div><label htmlFor="listing-colors" className={label}>{merch ? 'Clothing colors' : wood ? 'Finishes / colors' : 'Print colors'} *</label><input id="listing-colors" required className={field} value={availableColors} onChange={e=>setAvailableColors(e.target.value)} placeholder="Red, White, Black"/><p className="text-xs text-slate-500 mt-1">Separate colors with commas.</p></div>
         </div>
-        {merch && <div><label htmlFor="listing-apparel" className={label}>Available clothing sizes *</label><input id="listing-apparel" required className={field} value={merchSizes} onChange={e=>setMerchSizes(e.target.value)} placeholder="S, M, L, XL, 2XL"/><p className="text-xs text-slate-500 mt-1">Separate sizes with commas. Customers pick one.</p></div>}
+        {merch && <fieldset className="rounded-lg border border-slate-200 p-4 space-y-3 bg-slate-50">
+          <legend className="px-1 text-sm font-bold">Available clothing sizes *</legend>
+          <p className="text-xs text-slate-500">Tick every size you can offer. Customers must pick one.</p>
+          <div className="flex flex-wrap gap-2">
+            {orderSizes([...CLOTHING_SIZES, ...merchSizes]).map(size => <label key={size} className={`cursor-pointer select-none rounded border px-3 py-1.5 text-xs font-bold ${merchSizes.includes(size) ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-700'}`}>
+              <input type="checkbox" className="sr-only" checked={merchSizes.includes(size)} onChange={() => toggleSize(size)} aria-label={`Size ${size}`}/>{size}
+            </label>)}
+          </div>
+          <div className="flex gap-2 max-w-sm">
+            <input id="listing-custom-size" className={field} value={customSize} maxLength={30} onChange={e=>setCustomSize(e.target.value)}
+              onKeyDown={e=>{ if (e.key === 'Enter') { e.preventDefault(); addCustomSize(); } }} placeholder="Another size, e.g. 4XL or Youth XL"/>
+            <button type="button" onClick={addCustomSize} className="shrink-0 rounded bg-slate-900 px-3 py-2 text-xs font-bold text-white">Add size</button>
+          </div>
+          <p className="text-xs text-slate-600">{merchSizes.length ? `Customers can choose: ${merchSizes.join(', ')}` : 'No sizes selected yet.'}</p>
+        </fieldset>}
         {!merch && <div className="rounded-lg border border-slate-200 p-4 space-y-3 bg-slate-50">
-          <div className="flex flex-wrap justify-between items-center gap-2"><div><h3 className="font-bold text-sm">Available sizes and dimensions</h3><p className="text-xs text-slate-500">Add multiple versions of a print or woodwork item. Optional per-size fee overrides the base fee.</p></div><button type="button" className="flex items-center gap-1 rounded bg-slate-900 px-3 py-2 text-xs font-bold text-white" onClick={addSize}><Plus size={15}/> Add size</button></div>
+          <div className="flex flex-wrap justify-between items-center gap-2"><div><h3 className="font-bold text-sm">Available sizes and dimensions</h3><p className="text-xs text-slate-500">Add multiple versions of a print or woodwork item. Optional: give a size its own price (it replaces the product price for that size).</p></div><button type="button" className="flex items-center gap-1 rounded bg-slate-900 px-3 py-2 text-xs font-bold text-white" onClick={addSize}><Plus size={15}/> Add size</button></div>
           {sizeOptions.map((item,i)=><div key={i} className="grid grid-cols-1 sm:grid-cols-[1fr_1.4fr_0.8fr_auto] items-end gap-2 bg-white border p-3 rounded">
             <div><label className={label}>Size name *</label><input className={field} value={item.label} onChange={e=>editSize(i,'label',e.target.value)} placeholder="Small / 6-inch"/></div>
             <div><label className={label}>Dimensions *</label><input className={field} value={item.dimensions} onChange={e=>editSize(i,'dimensions',e.target.value)} placeholder="6 × 6 × 3 in"/></div>
-            <div><label className={label}>Fee (optional $)</label><input className={field} type="number" min="0" step="0.01" value={item.price ?? ''} onChange={e=>editSize(i,'price',e.target.value)} placeholder="Base fee"/></div>
+            <div><label className={label}>Price for this size ($, optional)</label><input className={field} type="number" min="0" step="0.01" value={item.price ?? ''} onChange={e=>editSize(i,'price',e.target.value)} placeholder="Same as product price"/></div>
             <button type="button" className="p-2 text-red-700 border border-red-200 rounded" aria-label={`Remove size ${i+1}`} onClick={()=>setSizeOptions(prev=>prev.filter((_,j)=>j!==i))}><Trash2 size={18}/></button>
           </div>)}
           {!sizeOptions.length && <p className="text-xs text-slate-500">No sizes added. Customers will request a standard version.</p>}
@@ -233,8 +293,7 @@ export const CreateEditListingView: React.FC = () => {
         <h2 className="font-extrabold text-base border-b pb-2">3. Availability and pricing</h2>
         <div className="grid sm:grid-cols-2 gap-4">
           <div><label htmlFor="listing-turnaround" className={label}>Estimated turnaround</label><input id="listing-turnaround" className={field} value={turnaround} onChange={e=>setTurnaround(e.target.value)} placeholder="3–5 school days"/><p className="text-xs text-slate-500 mt-1">Shown to customers, not a guaranteed pickup date.</p></div>
-          <div><label htmlFor="listing-price-type" className={label}>Pricing method</label><select id="listing-price-type" className={field} value={priceType} onChange={e=>setPriceType(e.target.value as 'fixed'|'quote')}><option value="quote">Estimate on request</option><option value="fixed">Starting material fee</option></select></div>
-          {priceType === 'fixed' && <div><label htmlFor="listing-price" className={label}>Starting material fee ($)</label><input id="listing-price" className={field} type="number" min="0" step="0.01" required value={price} onChange={e=>setPrice(e.target.value)}/></div>}
+          <div><label htmlFor="listing-price" className={label}>Price ($) *</label><input id="listing-price" className={field} type="number" min="0.01" max="100000" step="0.01" value={price} onChange={e=>setPrice(e.target.value)} placeholder="12.00"/><p className="text-xs text-slate-500 mt-1">The set price customers see in the shop, per item.</p></div>
         </div>
         <div className="border rounded-lg p-4 space-y-3">
           <label className="flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={stockTracked} onChange={e=>setStockTracked(e.target.checked)}/> Track a limited quantity in stock</label>

@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { PreferredUpdateMethod } from '../types';
 import { isMerchListing } from '../lib/listingKinds';
+import { formatMoney, listingPriceLabel, unitPrice } from '../lib/pricing';
 
 export const ProductPageView: React.FC = () => {
   const {
@@ -78,6 +79,9 @@ export const ProductPageView: React.FC = () => {
   const itemSizes = !isMerch ? product.sizeOptions || [] : [];
   const selectedVariant = itemSizes.find(x => x.label === selectedSize);
   const makerName = product.creatorDisplayName || product.makerName || 'Student Maker';
+  // Set price: the chosen size's price, else the product price.
+  const priceEach = unitPrice(product, selectedSize || undefined);
+  const priceLabel = selectedSize && priceEach !== null ? formatMoney(priceEach) : listingPriceLabel(product);
 
   const handleRequestQuote = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -165,8 +169,8 @@ export const ProductPageView: React.FC = () => {
       }
       setCreatedOrderId(result.orderId);
     } catch (err: any) {
-      console.error('Quote request error:', err);
-      setFormError(err.message || 'Failed to submit quote inquiry.');
+      console.error('Purchase request error:', err);
+      setFormError(err.message || 'Failed to submit your purchase request.');
     } finally {
       setIsSubmitting(false);
     }
@@ -228,6 +232,7 @@ export const ProductPageView: React.FC = () => {
               <h1 className="text-xl font-extrabold uppercase tracking-tight text-slate-900">
                 {title}
               </h1>
+              <p className="text-2xl font-black font-mono text-slate-900" aria-label="Price">{priceLabel}{priceEach !== null && <span className="text-xs font-semibold text-slate-500 font-sans"> each</span>}</p>
 
               <p className="text-xs text-slate-600 leading-relaxed">{product.description}</p>
               {product.orderInstructions && <p className="rounded bg-sky-50 border border-sky-200 p-3 text-xs text-slate-700"><strong>Item notes:</strong> {product.orderInstructions}</p>}
@@ -239,7 +244,7 @@ export const ProductPageView: React.FC = () => {
           <div className="p-3.5 bg-amber-50/90 border border-amber-200 rounded-lg text-xs text-amber-900 flex items-start gap-2 shadow-xs">
             <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
             <div className="leading-snug">
-              <span className="font-bold">Before fulfillment:</span> Submit your request without an account. Our team will contact you to confirm availability, your order, and the estimate before we start preparing it.
+              <span className="font-bold">How ordering works:</span> Submit your request (no account needed). We will reach out within 2 business days to confirm your order or ask any questions before we start preparing it.
             </div>
           </div>
 
@@ -257,10 +262,10 @@ export const ProductPageView: React.FC = () => {
                 ROOM Q10 • SHOP INQUIRY
               </div>
               <h2 className="text-lg font-extrabold uppercase tracking-tight text-slate-900">
-                Request Custom Quote
+                Request to Buy
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                No account required. Share your contact details and we will reach out to confirm your order and estimate before making or preparing the item.
+                No account required. Choose your options and share your contact details. You will get a confirmation email, and we will reach out within 2 business days.
               </p>
             </div>
 
@@ -275,7 +280,7 @@ export const ProductPageView: React.FC = () => {
                     </span>
                   </div>
                   <p className="leading-relaxed">
-                    Your request for <strong>{title}</strong> has been received. Our team will contact you to confirm your order and estimate <strong>before fulfillment begins</strong>.
+                    Your request for <strong>{title}</strong> has been received. We will reach out within 2 business days to confirm or ask any questions.{contactEmail.trim() && <> A confirmation email is on its way to <strong>{contactEmail.trim()}</strong>.</>}
                   </p>
                   <p className="pt-1 font-mono text-[11px]">Request reference: <strong>#{createdOrderId.slice(0, 8).toUpperCase()}</strong></p>
                   <p>When we tell you the item is ready for pickup, please visit <strong>Hueneme High School, Room Q10</strong>.</p>
@@ -436,7 +441,7 @@ export const ProductPageView: React.FC = () => {
                       <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">{isMerch ? "Clothing Size *" : "Product Size *"}</label>
                       <select required value={selectedSize} onChange={e => setSelectedSize(e.target.value)} className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded focus:bg-white focus:border-[#C41E3A] outline-hidden">
                         <option value="">Select a size</option>
-                        {isMerch ? product.merchSizes?.map(size=><option key={size} value={size}>{size}</option>) : itemSizes.map(size=><option key={size.label} value={size.label}>{size.label} — {size.dimensions}{typeof size.price === 'number' && product.priceType === 'fixed' ? ` ($${size.price.toFixed(2)})` : ''}</option>)}
+                        {isMerch ? product.merchSizes?.map(size=><option key={size} value={size}>{size}</option>) : itemSizes.map(size=><option key={size.label} value={size.label}>{size.label} — {size.dimensions}{unitPrice(product, size.label) !== null ? ` (${formatMoney(unitPrice(product, size.label)!)})` : ''}</option>)}
                       </select>
                     </div>}
                     {!!product.availableOptions?.length && <div>
@@ -464,7 +469,7 @@ export const ProductPageView: React.FC = () => {
 
                   <div>
                     <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">
-                      Inquiry Notes
+                      Notes (optional)
                     </label>
                     <textarea
                       rows={2}
@@ -482,7 +487,7 @@ export const ProductPageView: React.FC = () => {
                     <input id="quote-website" name="website" type="text" autoComplete="off" tabIndex={-1} value={website} onChange={e => setWebsite(e.target.value)} />
                   </div>
                   <p className="text-xs text-slate-600 bg-sky-50 border border-sky-200 rounded p-3">
-                    <strong>What happens next?</strong> We will contact you to confirm the estimate and your order before production starts. Once it is complete and ready for pickup, visit <strong>Room Q10 at Hueneme High School</strong>.
+                    <strong>What happens next?</strong> We will reach out within 2 business days to confirm or ask any questions. When your order is ready, we will let you know to pick it up at <strong>Room Q10, Hueneme High School</strong>.
                   </p>
                 </div>
 
@@ -494,11 +499,11 @@ export const ProductPageView: React.FC = () => {
                     className="w-full py-2.5 px-4 bg-[#C41E3A] hover:bg-[#A0182E] text-white font-bold text-xs uppercase tracking-wider rounded transition-colors flex items-center justify-center gap-2 shadow-xs disabled:opacity-60"
                   >
                     {isSubmitting ? (
-                      <span>Submitting Quote Inquiry...</span>
+                      <span>Submitting...</span>
                     ) : (
                       <>
                         <Send className="w-3.5 h-3.5" />
-                        <span>Submit Estimate Request</span>
+                        <span>Submit Purchase Request{priceEach !== null ? ` · ${formatMoney(priceEach * quantity)}` : ''}</span>
                       </>
                     )}
                   </button>

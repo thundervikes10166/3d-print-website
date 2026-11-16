@@ -14,11 +14,8 @@ import {
   FileText,
   Printer,
 } from 'lucide-react';
-import { ListingStatus, OrderStatus, RequestStatus } from '../types';
-import { RequestNotesPanel } from './RequestNotesPanel';
-import { nextRequestStatus, requestStatusLabel, displayRequestedDimensions } from '../lib/requestWorkflow';
-import { RequestPipeline } from './RequestPipeline';
-import { RequestReferenceAttachments } from './RequestReferenceAttachments';
+import { ListingStatus, OrderStatus } from '../types';
+import { listingPriceLabel } from '../lib/pricing';
 
 export const StudentDashboardView: React.FC = () => {
   const {
@@ -29,14 +26,12 @@ export const StudentDashboardView: React.FC = () => {
     orders,
     navigateTo,
     deleteListing,
-    updateRequestStatus,
-    addRequestNote,
     updateOrderStatus,
     setShowAuthModal,
     canPublishModel,
   } = useLab();
 
-  const [activeTab, setActiveTab] = useState<'listings' | 'requests' | 'orders'>('listings');
+  const [activeTab, setActiveTab] = useState<'listings' | 'orders'>('listings');
   // Staff share one store: show every product by default, with an option to see only your own.
   const [onlyMine, setOnlyMine] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -58,14 +53,6 @@ export const StudentDashboardView: React.FC = () => {
       (o) => o.sellerId === currentUser.uid
     );
   }, [orders, currentUser]);
-
-  // Custom requests assigned to this student or unassigned open queue
-  const assignedRequests = useMemo(() => {
-    if (!currentUser) return [];
-    return requests.filter(
-      (r) => r.assignedMakerId === currentUser.uid
-    );
-  }, [requests, currentUser]);
 
   if (!currentUser) {
     return (
@@ -101,23 +88,12 @@ export const StudentDashboardView: React.FC = () => {
     }
   };
 
-  const handleUpdateReqStatus = async (reqId: string, next: RequestStatus | null) => {
-    if (!next) return;
-    setActionError(null);
-    try {
-      await updateRequestStatus(reqId, next);
-      setActionSuccess(`Status updated to ${requestStatusLabel(next)}`);
-    } catch (err: any) {
-      setActionError(err.message || 'Failed to update request status.');
-    }
-  };
-
   const handleUpdateOrdStatus = async (ordId: string, newStatus: OrderStatus) => {
     setActionError(null);
     try {
-      await updateOrderStatus(ordId, newStatus, `Maker updated order status to ${newStatus}`);
-      setActionSuccess(`Order status updated to ${newStatus}`);
-      setTimeout(() => setActionSuccess(null), 3000);
+      const emailNote = await updateOrderStatus(ordId, newStatus, `Maker updated order status to ${newStatus}`);
+      setActionSuccess(`Order status updated to ${newStatus}.${emailNote ? ` ${emailNote}` : ''}`);
+      setTimeout(() => setActionSuccess(null), emailNote ? 8000 : 3000);
     } catch (err: any) {
       setActionError(err.message || 'Failed to update order status.');
     }
@@ -199,17 +175,6 @@ export const StudentDashboardView: React.FC = () => {
           <span>Incoming Orders ({incomingOrders.length})</span>
         </button>
 
-        <button
-          onClick={() => setActiveTab('requests')}
-          className={`px-4 py-2 text-xs font-mono font-bold uppercase tracking-wider rounded border transition-colors flex items-center gap-2 ${
-            activeTab === 'requests'
-              ? 'bg-slate-900 text-white border-slate-900'
-              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-          }`}
-        >
-          <FileText className="w-3.5 h-3.5" />
-          <span>Assigned CAD Requests ({assignedRequests.length})</span>
-        </button>
       </div>
 
       {/* Tab: My Listings */}
@@ -292,7 +257,7 @@ export const StudentDashboardView: React.FC = () => {
                       </h4>
 
                       <p className="text-xs text-slate-500 font-mono">
-                        Material: {listing.material} • Fee: ${((listing.price ?? listing.priceAmount) || 0).toFixed(2)}
+                        Material: {listing.material} • Price: {listingPriceLabel(listing)}
                       </p>
                     </div>
                   </div>
@@ -386,73 +351,6 @@ export const StudentDashboardView: React.FC = () => {
         </div>
       )}
 
-      {/* Tab: Assigned Requests */}
-      {activeTab === 'requests' && (
-        <div className="space-y-4">
-          {assignedRequests.length === 0 ? (
-            <div className="bg-white rounded border border-slate-200 p-12 text-center space-y-4 shadow-xs">
-              <div className="w-12 h-12 rounded bg-slate-100 flex items-center justify-center mx-auto text-slate-500">
-                <FileText className="w-6 h-6" />
-              </div>
-              <h3 className="text-base font-extrabold uppercase tracking-tight text-slate-900">
-                No Assigned Custom Requests
-              </h3>
-              <p className="text-xs text-slate-500 max-w-sm mx-auto font-normal">
-                When teachers or robotics teams assign a custom CAD fabrication ticket to you, it will appear here.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {assignedRequests.map((req) => (
-                <div
-                  key={req.id}
-                  className="bg-white rounded border border-slate-200 p-4 sm:p-5 space-y-4 shadow-xs"
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-500">
-                        {req.ticketNumber}
-                      </span>
-                      <span className="px-2 py-0.5 bg-purple-50 text-purple-800 border border-purple-200 rounded text-[10px] font-mono font-bold uppercase">
-                        {requestStatusLabel(req.status)}
-                      </span>
-                    </div>
-                    <h4 className="text-sm font-extrabold uppercase tracking-tight text-slate-900">
-                      {req.itemTitle}
-                    </h4>
-                    <p className="text-xs text-slate-600 line-clamp-2 font-normal">
-                      {req.description}
-                    </p>
-                    <div className="text-xs text-slate-500 font-mono">
-                      Requester: <strong>{req.requesterDisplayName}</strong> • Needed By: {req.neededByDate}
-                    </div>
-
-                    <div className="text-xs text-slate-500">
-                      Size: {req.desiredSize || req.desiredDimensions || 'Not specified'} • {req.colorMode === 'multicolor' ? 'Multicolor' : 'Solid / unspecified'}: {req.color || 'Not specified'}
-                    </div>
-                    <RequestReferenceAttachments request={req} />
-                  </div>
-
-                  <RequestPipeline status={req.status} />
-                  <div className="text-xs text-slate-600"><strong>Dimensions:</strong> {displayRequestedDimensions(req)} · <strong>Quantity:</strong> {req.quantity || 1}</div>
-                  <div className="flex items-center gap-2">
-                    {nextRequestStatus(req.status) && (
-                      <button
-                        type="button"
-                        onClick={() => handleUpdateReqStatus(req.id, nextRequestStatus(req.status))}
-                        className="px-3 py-1.5 bg-[#C41E3A] hover:bg-[#99162D] text-white rounded text-[11px] font-bold"
-                      >
-                        Move to: {requestStatusLabel(nextRequestStatus(req.status)!)}
-                      </button>
-                    )}
-                  </div>
-                  <RequestNotesPanel requestId={req.id} onAddNote={addRequestNote} />
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 };

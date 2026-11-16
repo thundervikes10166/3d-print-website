@@ -35,9 +35,10 @@ export const TeacherAdminDashboardView:React.FC=()=>{
   const visibleOrders=useMemo(()=>orders.filter(o=>orderQueue==='completed'?o.status==='completed':o.status!=='completed'),[orders,orderQueue]);
   const visibleRequests=useMemo(()=>requests.filter(r=>cadQueue==='completed'?r.status==='completed':r.status!=='completed'),[requests,cadQueue]);
   const filteredStudents=classStudents.filter(s=>[s.email,s.name,s.period].join(' ').toLowerCase().includes(studentSearch.toLowerCase()));
-  const run=async(task:()=>Promise<unknown>,success:string)=>{
+  // success may add the result of the task, e.g. whether the customer was emailed.
+  const run=async<T,>(task:()=>Promise<T>,success:string|((result:T)=>string))=>{
     setBusy(true);setError(null);setNotice(null);
-    try{await task();setNotice(success);}catch(e:any){setError(e.message||'Could not save the changes.');throw e;}
+    try{const result=await task();setNotice(typeof success==='function'?success(result):success);}catch(e:any){setError(e.message||'Could not save the changes.');throw e;}
     finally{setBusy(false);}
   };
   const guarded=async(task:()=>Promise<unknown>,success:string)=>{try{await run(task,success);}catch{/* Message is shown above. */}};
@@ -75,7 +76,7 @@ export const TeacherAdminDashboardView:React.FC=()=>{
         </div>
       </div>
       {visibleOrders.length?visibleOrders.map(order=><OrderManagementCard key={order.id} order={order} processing={busy}
-        onChangeStage={(id,status,note)=>run(()=>updateOrderStatus(id,status,note),'Shop order stage updated and recorded.')}
+        onChangeStage={(id,status,note)=>run(()=>updateOrderStatus(id,status,note),emailNote=>`Shop order stage updated and recorded.${emailNote?` ${emailNote}`:''}`)}
         onSaveDetails={(id,updates)=>run(()=>updateOrderDetails(id,updates),'Shop order details saved.')}/>):<p className="bg-white p-8 border border-slate-200 rounded text-sm text-slate-500 text-center">No {orderQueue} shop orders.</p>}
     </section>}
     {activeTab==='requests'&&<section className="space-y-4">
@@ -86,7 +87,7 @@ export const TeacherAdminDashboardView:React.FC=()=>{
         </div>
       </div>
       {visibleRequests.length?visibleRequests.map(request=><RequestManagementCard key={request.id} request={request} processing={busy}
-        onChangeStage={(id,status,note)=>run(()=>updateRequestStatus(id,status,note),'Custom request stage updated and recorded.')}
+        onChangeStage={(id,status,note)=>run(()=>updateRequestStatus(id,status,note),emailNote=>`Custom request stage updated and recorded.${emailNote?` ${emailNote}`:''}`)}
         onSaveDetails={(id,updates)=>run(()=>updateRequestDetails(id,updates),'Custom request details saved.')}
         onAddNote={(id,note)=>run(()=>addRequestNote(id,note),'Internal staff note saved.')}
         onDelete={canManageAccounts?async id=>{const message=await deleteRequest(id);setError(null);setNotice(message);}:undefined}/>):<p className="bg-white p-8 border border-slate-200 rounded text-sm text-slate-500 text-center">No {cadQueue} custom print requests.</p>}

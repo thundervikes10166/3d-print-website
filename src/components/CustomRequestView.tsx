@@ -309,7 +309,7 @@ export const CustomRequestView: React.FC = () => {
               Request Submitted to Queue
             </h2>
             <p className="text-xs text-slate-600 max-w-md mx-auto">
-              Your request has been submitted. Our team will reach out with an estimate before printing begins.
+              Thank you for sending in your request. We will be reaching out within 2 business days to confirm or ask any questions, including the price, before printing begins.{contactEmail.trim() && <> A confirmation email is on its way to <strong>{contactEmail.trim()}</strong>.</>}
             </p>
             <div className="pt-2 text-xs font-mono text-[#C41E3A] font-bold">
               Preferred Updates: {preferredUpdateMethod === 'email' ? 'Email' : 'Phone'} ({preferredUpdateMethod === 'email' ? contactEmail : contactPhone})

@@ -2,6 +2,7 @@ import React from 'react';
 import { useLab } from '../context/LabContext';
 import { Listing } from '../types';
 import { isMerchListing } from '../lib/listingKinds';
+import { listingPriceLabel } from '../lib/pricing';
 
 interface ProductCardProps {
   product: Listing;
@@ -14,10 +15,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
   const isMerch = isMerchListing(product);
   const stock = typeof product.stockQuantity === 'number' ? product.stockQuantity : null;
   const soldOut = stock === 0;
-  const priceDisplay =
-    product.priceType === 'quote'
-      ? 'Custom Quote'
-      : `$${(product.price ?? product.priceAmount ?? 0).toFixed(2)}`;
+  const priceDisplay = listingPriceLabel(product);
 
   return (
     <div
@@ -78,7 +76,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
             }}
             className="px-3 py-1.5 bg-[#C41E3A] hover:bg-[#A0182E] text-white text-xs font-bold uppercase tracking-wider rounded transition-colors shadow-xs"
           >
-            {soldOut ? "View Item" : "Request Quote"}
+            {soldOut ? "View Item" : "Request to Buy"}
           </button>
         </div>
       </div>

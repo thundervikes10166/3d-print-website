@@ -33,9 +33,18 @@ Online store and custom-print request portal for the Hueneme High School Robotic
 |---|---|---|
 | `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, `VITE_FIREBASE_APP_ID` | **Builds** | Website (baked in at build time) |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | Functions (secret) | Netlify Functions |
-| `RESEND_API_KEY`, `NOTIFICATION_FROM_EMAIL` | Functions (secret) | Admin emails |
+| `GMAIL_USER`, `GMAIL_APP_PASSWORD` | Functions (secret) | Customer + admin emails via the team Gmail (free, no domain needed) |
+| `RESEND_API_KEY`, `NOTIFICATION_FROM_EMAIL` | Functions (secret) | Alternative to Gmail; used first if set. Needs a domain verified in Resend to email customers |
 
 Changing a variable requires a new deploy (Deploys → Trigger deploy).
+
+## Automatic customer emails
+
+Sent by Netlify Functions using `netlify/lib/mailer.cjs`; wording lives in `netlify/lib/customerEmails.cjs`.
+
+- **Confirmation** ("Thank you for sending in your request...within 2 business days") right after a shop purchase request (`submit-shop-estimate`) or a custom 3D print request (`customer-email`).
+- **Ready for pickup** when staff move an order or request to *Ready for pickup* (`customer-email`). Sent once per record; staff see the result in the stage-change message.
+- Customers who give only a phone number get no email; staff are told to call.
 
 ## Working in Codespaces
 

@@ -9,6 +9,7 @@ const crypto = require('node:crypto');
 const { initializeApp, getApps, cert } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+const mailer = require('../lib/mailer.cjs');
 
 const OWNER_EMAIL = 'jonathan.soto@oxnardunion.org';
 const LIFE_MS = 72 * 60 * 60 * 1000;
@@ -41,35 +42,25 @@ async function isAdmin(db, user) {
 }
 
 async function sendInvitation(to, inviteUrl) {
-  const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.NOTIFICATION_FROM_EMAIL;
-  if (!apiKey || !from) throw new Error('RESEND_API_KEY and NOTIFICATION_FROM_EMAIL must be configured in Netlify.');
-  const resp = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      from,
-      to: [to],
-      subject: 'Invitation to manage the Thunder Vikes store',
-      text: [
-        'You have been invited to be an administrator of the Thunder Vikes Robotics Store.',
-        '',
-        'Open this private invitation link:',
-        inviteUrl,
-        '',
-        'Sign in with the same email address, or register and choose your own password if you do not yet have an account.',
-        'Then select Activate Admin Access. The invitation expires after 72 hours.',
-        '',
-        'If you were not expecting this invitation, ignore it.',
-        'Thunder Vikes Robotics · Hueneme High School · Room Q10',
-      ].join('\n'),
-    }),
-  });
-  if (!resp.ok) {
-    const result = await resp.text().catch(() => '');
-    console.error('Admin invite Resend error', resp.status, result.slice(0, 500));
-    throw new Error(`Email provider rejected the invitation (HTTP ${resp.status}). Check Netlify function logs and Resend settings.`);
+  if (!mailer.emailProvider()) {
+    throw new Error('Email is not set up yet. Add RESEND_API_KEY and NOTIFICATION_FROM_EMAIL in Netlify (or the Gmail settings), then redeploy.');
   }
+  await mailer.sendEmail({
+    to,
+    subject: 'Invitation to manage the Thunder Vikes store',
+    text: [
+      'You have been invited to be an administrator of the Thunder Vikes Robotics Store.',
+      '',
+      'Open this private invitation link:',
+      inviteUrl,
+      '',
+      'Sign in with the same email address, or register and choose your own password if you do not yet have an account.',
+      'Then select Activate Admin Access. The invitation expires after 72 hours.',
+      '',
+      'If you were not expecting this invitation, ignore it.',
+      'Thunder Vikes Robotics · Hueneme High School · Room Q10',
+    ].join('\n'),
+  });
 }
 
 exports.handler = async (event) => {
