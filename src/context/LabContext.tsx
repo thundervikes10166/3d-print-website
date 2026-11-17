@@ -107,9 +107,11 @@ interface LabContextType {
   deleteListing: (listingId: string) => Promise<void>;
   approveListing: (listingId: string) => Promise<void>;
   rejectListing: (listingId: string) => Promise<void>;
+  /** Saves the display order: ids listed first show first. */
+  reorderListings: (orderedIds: string[]) => Promise<void>;
 
   // Firestore Operations (Custom Requests)
-  createCustomRequest: (requestData: Omit<CustomRequest, 'id' | 'ticketNumber' | 'createdAt' | 'status'>) => Promise<string>;
+  createCustomRequest: (requestData: Omit<CustomRequest, 'id' | 'ticketNumber' | 'createdAt' | 'status'>) => Promise<{ id: string; ticketNumber: string }>;
   /** Resolves to a note about the customer pickup email when moved to Ready. */
   updateRequestStatus: (requestId: string, status: RequestStatus, note?: string) => Promise<string>;
   addRequestNote: (requestId: string, note: string) => Promise<void>;
@@ -143,7 +145,8 @@ interface LabContextType {
   adminAccountRecords: { email: string; status: string }[];
   acceptAdminInvitation: (token: string) => Promise<void>;
   isWhitelistedAdminEmail: (email?: string | null) => boolean;
-  addAdminEmail: (email: string) => Promise<void>;
+  /** Grants admin now if they have an account, else returns a shareable invite link. */
+  addAdminEmail: (email: string) => Promise<{ message: string; inviteUrl?: string; granted?: boolean }>;
   removeAdminEmail: (email: string) => Promise<void>;
 }
 
@@ -175,6 +178,16 @@ const getTimestampMillis = (val: any): number => {
     return isNaN(d) ? 0 : d;
   }
   return 0;
+};
+
+// Store order: products not yet arranged (e.g. just added) show first, newest
+// first; arranged products follow in the order staff chose.
+const compareListings = (a: Listing, b: Listing): number => {
+  const aSet = typeof a.sortOrder === 'number';
+  const bSet = typeof b.sortOrder === 'number';
+  if (aSet && bSet) return (a.sortOrder as number) - (b.sortOrder as number);
+  if (aSet !== bSet) return aSet ? 1 : -1;
+  return getTimestampMillis(b.createdAt) - getTimestampMillis(a.createdAt);
 };
 
 const LabContext = createContext<LabContextType | undefined>(undefined);
@@ -355,9 +368,7 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ? publishedOrAllListings
         : [...publishedOrAllListings, ...ownListings];
       const byId = new Map(combined.map((item) => [item.id, item]));
-      const sorted = Array.from(byId.values()).sort(
-        (a, b) => getTimestampMillis(b.createdAt) - getTimestampMillis(a.createdAt)
-      );
+      const sorted = Array.from(byId.values()).sort(compareListings);
       setListings(sorted);
       setIsLoadingData(false);
     };
@@ -667,6 +678,13 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
+  const reorderListings = async (orderedIds: string[]) => {
+    if (!canManageStore) throw new Error('Staff approval required.');
+    const batch = writeBatch(db);
+    orderedIds.forEach((id, index) => batch.update(doc(db, 'listings', id), { sortOrder: (index + 1) * 10 }));
+    await batch.commit();
+  };
+
   const deleteListing = async (listingId: string) => {
     if (!canManageStore) throw new Error('Staff approval required.');
     const docRef = doc(db, 'listings', listingId);
@@ -694,7 +712,7 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Firestore Write Operations (Custom Requests)
   const createCustomRequest = async (
     requestData: Omit<CustomRequest, 'id' | 'ticketNumber' | 'createdAt' | 'status'>
-  ): Promise<string> => {
+  ): Promise<{ id: string; ticketNumber: string }> => {
     if (!currentUser) throw new Error('Authentication required to submit custom requests.');
 
     const ticketNumber = `REQ-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -719,7 +737,7 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const docRef = await addDoc(collection(db, 'requests'), newRequest);
     // "We received your request" email. Never blocks or fails the submission.
     void sendCustomerEmail('request', docRef.id, 'confirmation');
-    return docRef.id;
+    return { id: docRef.id, ticketNumber };
   };
 
   // Automatic customer emails are sent by the `customer-email` Netlify function.
@@ -741,7 +759,7 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       switch (result.reason) {
         case 'already-sent': return 'The customer was already emailed about this.';
         case 'no-email': return 'No customer email on file: contact them by phone.';
-        case 'not-configured': return 'Customer email not sent: email is not set up in Netlify yet.';
+        case 'not-configured': return 'Remember to let the customer know (text or email).';
         default: return `Customer email not sent: ${result.error || 'unknown problem'}.`;
       }
     } catch {
@@ -1067,7 +1085,7 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Firebase role assignment must happen on a trusted server, never through
   // localStorage, the client-side allowlist, or a browser Firestore write.
-  const adminApi = async (data: Record<string, unknown>): Promise<{message: string}> => {
+  const adminApi = async (data: Record<string, unknown>): Promise<{message: string; inviteUrl?: string; granted?: boolean}> => {
     if (!currentUser) throw new Error('Sign in before managing administrator access.');
     const token = await currentUser.getIdToken();
     const response = await fetch('/.netlify/functions/manage-admin-access', {
@@ -1103,8 +1121,8 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const addAdminEmail = async (email: string) => {
-    if (!canManageAccounts) throw new Error('Only administrators can send invitations.');
-    await adminApi({ action: 'invite', email: email.trim().toLowerCase() });
+    if (!canManageAccounts) throw new Error('Only administrators can add administrators.');
+    return adminApi({ action: 'invite', email: email.trim().toLowerCase() });
   };
 
   const removeAdminEmail = async (email: string) => {
@@ -1172,6 +1190,7 @@ export const LabProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteListing,
         approveListing,
         rejectListing,
+        reorderListings,
         createCustomRequest,
         updateRequestStatus,
         addRequestNote,

@@ -143,6 +143,8 @@ export interface Listing {
   specs?: ListingSpecs;
   usageNotes?: string;
   status: ListingStatus;
+  /** Position chosen by staff in Manage > Shop Catalog (lower shows first). */
+  sortOrder?: number;
   createdAt: any;
   updatedAt?: any;
 }

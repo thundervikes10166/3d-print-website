@@ -41,6 +41,27 @@ async function isAdmin(db, user) {
   return profile.exists && profile.data().role === 'admin';
 }
 
+function siteUrl() {
+  const configuredUrl = process.env.URL || 'https://thunder-vikes-orders.netlify.app';
+  if (!/^https:\/\//i.test(configuredUrl)) throw new Error('Netlify URL must use HTTPS.');
+  return configuredUrl.replace(/\/$/, '');
+}
+
+async function sendAdminGrantedNotice(to, url) {
+  await mailer.sendEmail({
+    to,
+    subject: 'You are now an administrator of the Thunder Vikes store',
+    text: [
+      'You have been made an administrator of the Thunder Vikes Robotics Store.',
+      '',
+      `Sign in at ${url} with this email address. The Manage menu now appears for you.`,
+      '',
+      'If you were not expecting this, contact thundervikes10166@gmail.com.',
+      'Thunder Vikes Robotics · Hueneme High School · Room Q10',
+    ].join('\n'),
+  });
+}
+
 async function sendInvitation(to, inviteUrl) {
   if (!mailer.emailProvider()) {
     throw new Error('Email is not set up yet. Add RESEND_API_KEY and NOTIFICATION_FROM_EMAIL in Netlify (or the Gmail settings), then redeploy.');
@@ -106,26 +127,63 @@ exports.handler = async (event) => {
     if (!(await isAdmin(db, user))) return reply(403, { error: 'Only existing administrators can invite or remove administrators.' });
 
     if (action === 'invite') {
+      // Adding an admin NEVER depends on email. Email is only a courtesy.
       const email = normalize(body.email);
       if (!isEmail(email)) return reply(400, { error: 'Enter a valid email address.' });
       if (email === normalize(user.email)) return reply(400, { error: 'Your account is already an administrator.' });
-      const token = crypto.randomBytes(32).toString('hex');
       const key = hash(email);
       const inviteRef = db.collection('admin_invitations').doc(key);
       const whitelistRef = db.collection('admin_whitelist').doc(key);
-      const configuredUrl = process.env.URL || 'https://thunder-vikes-orders.netlify.app';
-      if (!/^https:\/\//i.test(configuredUrl)) throw new Error('Netlify URL must use HTTPS.');
-      const inviteUrl = `${configuredUrl.replace(/\/$/, '')}/#admin-invite?token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
+
+      // 1) They already have an account on the site: make them an admin right now.
+      let target = null;
+      try { target = await auth.getUserByEmail(email); }
+      catch (error) { if (error?.code !== 'auth/user-not-found') throw error; }
+      if (target) {
+        const profileRef = db.collection('users').doc(target.uid);
+        const profile = await profileRef.get();
+        if (profile.exists && profile.data().role === 'admin') {
+          await whitelistRef.set({ email, uid: target.uid, status: 'active', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+          return reply(200, { granted: true, message: `${email} is already an administrator.` });
+        }
+        await profileRef.set({
+          uid: target.uid, email, role: 'admin', updatedAt: FieldValue.serverTimestamp(),
+          ...(profile.exists ? {} : { displayName: target.displayName || email.split('@')[0], createdAt: FieldValue.serverTimestamp() }),
+        }, { merge: true });
+        await whitelistRef.set({ email, uid: target.uid, status: 'active', grantedByUid: user.uid, grantedAt: FieldValue.serverTimestamp() }, { merge: true });
+        await inviteRef.delete().catch(() => {});
+        let emailed = false;
+        if (mailer.emailProvider()) {
+          try { await sendAdminGrantedNotice(email, siteUrl()); emailed = true; }
+          catch (error) { console.warn('Admin granted notice not emailed:', error.message); }
+        }
+        return reply(200, {
+          granted: true,
+          message: `${email} is now an administrator. They will see the Manage tools the next time they open or refresh the site.${emailed ? ' We also emailed them.' : ''}`,
+        });
+      }
+
+      // 2) No account yet: create a one-time invitation link that YOU can share,
+      //    and also email it when email is set up. They register, then activate.
+      const token = crypto.randomBytes(32).toString('hex');
+      const inviteUrl = `${siteUrl()}/#admin-invite?token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
       // A role is never granted at the invite stage. This only stores a pending token.
       await inviteRef.set({ email, tokenHash: hash(token), status: 'pending', invitedByUid: user.uid, invitedByEmail: normalize(user.email), invitedAt: FieldValue.serverTimestamp(), expiresAt: Date.now() + LIFE_MS });
-      try {
-        await sendInvitation(email, inviteUrl);
-      } catch (error) {
-        await inviteRef.delete().catch(() => {});
-        throw error;
-      }
       await whitelistRef.set({ email, status: 'invited', invitedAt: FieldValue.serverTimestamp(), invitedByUid: user.uid }, { merge: true });
-      return reply(200, { message: `Invitation sent to ${email}. They must sign in and accept before gaining admin access.` });
+      let emailed = false;
+      let emailProblem = '';
+      if (mailer.emailProvider()) {
+        try { await sendInvitation(email, inviteUrl); emailed = true; }
+        catch (error) { emailProblem = error.message; console.warn('Admin invitation not emailed:', error.message); }
+      }
+      return reply(200, {
+        granted: false,
+        inviteUrl,
+        emailed,
+        message: emailed
+          ? `${email} does not have an account yet. We emailed them an invitation link (also shown below). They create an account with that email, then select Activate Admin Access.`
+          : `${email} does not have an account yet. Copy the invitation link below and send it to them (text, chat, or email). They create an account with that email, then select Activate Admin Access.${emailProblem ? ` (Automatic email failed: ${emailProblem})` : ''}`,
+      });
     }
 
     if (action === 'revoke') {

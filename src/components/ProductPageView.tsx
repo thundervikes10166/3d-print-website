@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { PreferredUpdateMethod } from '../types';
 import { isMerchListing } from '../lib/listingKinds';
+import { SubmissionThankYouModal } from './SubmissionThankYouModal';
 import { formatMoney, listingPriceLabel, unitPrice } from '../lib/pricing';
 
 export const ProductPageView: React.FC = () => {
@@ -52,6 +53,7 @@ export const ProductPageView: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [createdOrderId, setCreatedOrderId] = useState<string | null>(null);
+  const [showThankYou, setShowThankYou] = useState(false);
 
   if (!product) {
     return (
@@ -168,6 +170,7 @@ export const ProductPageView: React.FC = () => {
         throw new Error(result?.error || 'Could not submit your request. Please try again or email the team.');
       }
       setCreatedOrderId(result.orderId);
+      setShowThankYou(true);
     } catch (err: any) {
       console.error('Purchase request error:', err);
       setFormError(err.message || 'Failed to submit your purchase request.');
@@ -180,6 +183,9 @@ export const ProductPageView: React.FC = () => {
 
   return (
     <div className="max-w-5xl mx-auto space-y-6 pb-20">
+      <SubmissionThankYouModal open={showThankYou} onClose={() => setShowThankYou(false)}
+        reference={createdOrderId ? `#${createdOrderId.slice(0, 8).toUpperCase()}` : ''} itemTitle={title}
+        contactEmail={contactEmail} contactPhone={contactPhone}/>
       
       {/* Navigation */}
       <div>
@@ -265,7 +271,7 @@ export const ProductPageView: React.FC = () => {
                 Request to Buy
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                No account required. Choose your options and share your contact details. You will get a confirmation email, and we will reach out within 2 business days.
+                No account required. Choose your options and share your contact details. We will reach out by text or email within 2 business days.
               </p>
             </div>
 
@@ -280,7 +286,7 @@ export const ProductPageView: React.FC = () => {
                     </span>
                   </div>
                   <p className="leading-relaxed">
-                    Your request for <strong>{title}</strong> has been received. We will reach out within 2 business days to confirm or ask any questions.{contactEmail.trim() && <> A confirmation email is on its way to <strong>{contactEmail.trim()}</strong>.</>}
+                    Your request for <strong>{title}</strong> has been received. We will reach out within 2 business days to confirm or ask any questions. Please keep an eye on your email and phone: we may text or email you.
                   </p>
                   <p className="pt-1 font-mono text-[11px]">Request reference: <strong>#{createdOrderId.slice(0, 8).toUpperCase()}</strong></p>
                   <p>When we tell you the item is ready for pickup, please visit <strong>Hueneme High School, Room Q10</strong>.</p>

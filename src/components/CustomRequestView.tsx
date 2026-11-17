@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useLab } from '../context/LabContext';
+import { SubmissionThankYouModal } from './SubmissionThankYouModal';
 import {
   ImagePlus,
   X,
@@ -97,6 +98,7 @@ export const CustomRequestView: React.FC = () => {
   const [showContactConfirmation, setShowContactConfirmation] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccessTicket, setSubmitSuccessTicket] = useState<string | null>(null);
+  const [showThankYou, setShowThankYou] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -231,9 +233,10 @@ export const CustomRequestView: React.FC = () => {
         pickupLocation: 'Hueneme High School • Room Q10 Print Pickup Shelf',
       };
 
-      const docId = await createCustomRequest(requestData);
+      const created = await createCustomRequest(requestData);
 
-      setSubmitSuccessTicket(docId);
+      setSubmitSuccessTicket(created.ticketNumber);
+      setShowThankYou(true);
     } catch (err: any) {
       if (uploadedImagePath) {
         await deleteUploadedRequestImage(uploadedImagePath).catch(() => {});
@@ -298,6 +301,9 @@ export const CustomRequestView: React.FC = () => {
         </div>
       )}
 
+      <SubmissionThankYouModal open={showThankYou} onClose={() => setShowThankYou(false)}
+        reference={submitSuccessTicket || ''} itemTitle={itemTitle.trim() || 'Custom 3D print'}
+        contactEmail={contactEmail} contactPhone={contactPhone}/>
       {submitSuccessTicket ? (
         <div className="bg-white rounded-lg border border-slate-200 p-8 text-center space-y-4 shadow-xs">
           <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
@@ -309,7 +315,7 @@ export const CustomRequestView: React.FC = () => {
               Request Submitted to Queue
             </h2>
             <p className="text-xs text-slate-600 max-w-md mx-auto">
-              Thank you for sending in your request. We will be reaching out within 2 business days to confirm or ask any questions, including the price, before printing begins.{contactEmail.trim() && <> A confirmation email is on its way to <strong>{contactEmail.trim()}</strong>.</>}
+              Thank you for sending in your request. We will be reaching out within 2 business days to confirm or ask any questions, including the price, before printing begins. Please keep an eye on your email and phone: we may text or email you.
             </p>
             <div className="pt-2 text-xs font-mono text-[#C41E3A] font-bold">
               Preferred Updates: {preferredUpdateMethod === 'email' ? 'Email' : 'Phone'} ({preferredUpdateMethod === 'email' ? contactEmail : contactPhone})

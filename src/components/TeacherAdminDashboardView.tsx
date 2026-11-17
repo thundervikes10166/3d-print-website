@@ -1,5 +1,8 @@
 import React, {useMemo,useState} from 'react';
-import { Check, X, Trash2, Plus, ChevronDown, ShieldCheck, ShoppingBag, FileText, Users, Package, FolderPlus } from 'lucide-react';
+import { Check, X, Trash2, Plus, ChevronDown, ChevronUp, ChevronsUp, ShieldCheck, ShoppingBag, FileText, Users, Package, FolderPlus } from 'lucide-react';
+import { isMerchListing } from '../lib/listingKinds';
+import { listingPriceLabel } from '../lib/pricing';
+import type { Listing } from '../types';
 import {useLab} from '../context/LabContext';
 import {OrderManagementCard} from './OrderManagementCard';
 import {RequestManagementCard} from './RequestManagementCard';
@@ -14,7 +17,7 @@ export const TeacherAdminDashboardView:React.FC=()=>{
   const lab=useLab();
   const {currentUser,isAdminWhitelisted,canManageStore,canManageAccounts,setShowAuthModal,
     listings,orders,requests,categories,classStudents,studentApplications,adminWhitelist,adminAccountRecords,
-    navigateTo,approveListing,deleteListing,updateRequestStatus,updateRequestDetails,addRequestNote,deleteRequest,
+    navigateTo,approveListing,deleteListing,reorderListings,updateRequestStatus,updateRequestDetails,addRequestNote,deleteRequest,
     updateOrderStatus,updateOrderDetails,addCategory,deleteCategory,
     approveStudentApplication,rejectStudentApplication,addClassStudent,removeClassStudent,
     updateClassStudent,addAdminEmail,removeAdminEmail}=lab;
@@ -29,6 +32,8 @@ export const TeacherAdminDashboardView:React.FC=()=>{
   const [studentName,setStudentName]=useState('');
   const [studentPeriod,setStudentPeriod]=useState('Robotics / Makers');
   const [adminEmail,setAdminEmail]=useState('');
+  const [inviteLink,setInviteLink]=useState<{email:string;url:string}|null>(null);
+  const [linkCopied,setLinkCopied]=useState(false);
   const [studentSearch,setStudentSearch]=useState('');
   const pendingStudents=studentApplications.filter(a=>a.status==='pending');
   const activeTab=(canManageAccounts || !['class_students','admin_accounts'].includes(tab))?tab:'orders';
@@ -94,10 +99,23 @@ export const TeacherAdminDashboardView:React.FC=()=>{
     </section>}
     {activeTab==='catalog'&&<section className="space-y-3">
       <div className="bg-white border border-slate-200 rounded p-4 flex items-center justify-between gap-4"><div><h2 className="text-base font-extrabold">Shop Catalog</h2><p className="text-xs text-slate-600">Approved Class Students and admins can add, edit and remove products.</p></div><button className={`${primary} px-4 py-2 rounded text-xs font-bold`} onClick={()=>navigateTo('create_listing')}>+ Add product</button></div>
-      {listings.length?listings.map(item=><article key={item.id} className="bg-white border border-slate-200 rounded p-4 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3 min-w-0">{item.imageUrl&&<img src={item.imageUrl} alt="" className="w-12 h-12 object-cover rounded border"/>}<div className="min-w-0"><strong className="block text-sm truncate">{item.title}</strong><p className="text-xs text-slate-500">{item.category} · {item.status} · {item.priceType==='quote'?'Quote':`$${(item.price||0).toFixed(2)}`}</p></div></div>
-        <div className="flex gap-2 shrink-0"><button className={`${secondary} px-3 py-1.5 rounded text-xs font-bold`} onClick={()=>navigateTo('edit_listing',{listingId:item.id})}>Edit</button>{item.status==='pendingApproval'&&<button className={`${primary} px-3 py-1.5 rounded text-xs font-bold`} disabled={busy} onClick={()=>guarded(()=>approveListing(item.id),'Older pending listing published.')}>Publish</button>}<button className="text-red-700 hover:bg-red-50 px-2 rounded" aria-label={`Delete ${item.title}`} title="Delete product" disabled={busy} onClick={()=>{if(window.confirm(`Delete ${item.title}?`))guarded(()=>deleteListing(item.id),'Product deleted.');}}><Trash2 className="w-4 h-4"/></button></div>
-      </article>):<div className="p-8 text-sm text-slate-500 text-center bg-white border rounded">No products yet.</div>}
+      {!listings.length&&<div className="p-8 text-sm text-slate-500 text-center bg-white border rounded">No products yet.</div>}
+      {([['Shop page (3D prints & woodwork)',listings.filter(l=>!isMerchListing(l))],['Merch page (clothing)',listings.filter(l=>isMerchListing(l))]] as [string,Listing[]][]).filter(([,group])=>group.length).map(([groupTitle,group])=><div key={groupTitle} className="space-y-2">
+      <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-600 pt-2">{groupTitle} <span className="font-normal normal-case">· customers see products in this order</span></h3>
+      {group.map((item,position)=>{
+        // Moving rewrites this page's order only; the other page is unaffected.
+        const move=(to:number)=>{const ids=group.map(l=>l.id);ids.splice(position,1);ids.splice(to,0,item.id);guarded(()=>reorderListings(ids),`Moved "${item.title}" to position ${to+1}.`);};
+        return <article key={item.id} className="bg-white border border-slate-200 rounded p-3 sm:p-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="flex flex-col items-center gap-0.5 shrink-0" aria-label={`Position ${position+1} of ${group.length}`}>
+            <button type="button" className="p-1 rounded hover:bg-slate-100 disabled:opacity-30" disabled={busy||position===0} onClick={()=>move(position-1)} aria-label={`Move ${item.title} up`} title="Move up"><ChevronUp className="w-4 h-4"/></button>
+            <span className="text-[11px] font-mono font-bold text-slate-500">{position+1}</span>
+            <button type="button" className="p-1 rounded hover:bg-slate-100 disabled:opacity-30" disabled={busy||position===group.length-1} onClick={()=>move(position+1)} aria-label={`Move ${item.title} down`} title="Move down"><ChevronDown className="w-4 h-4"/></button>
+          </div>
+          {item.imageUrl&&<img src={item.imageUrl} alt="" className="w-12 h-12 object-cover rounded border"/>}<div className="min-w-0"><strong className="block text-sm truncate">{item.title}</strong><p className="text-xs text-slate-500">{item.category} · {item.status} · {listingPriceLabel(item)}</p></div></div>
+        <div className="flex gap-2 shrink-0 items-center"><button type="button" className="p-1.5 rounded border border-slate-300 hover:bg-slate-100 disabled:opacity-30" disabled={busy||position===0} onClick={()=>move(0)} aria-label={`Move ${item.title} to top`} title="Move to top"><ChevronsUp className="w-4 h-4"/></button><button className={`${secondary} px-3 py-1.5 rounded text-xs font-bold`} onClick={()=>navigateTo('edit_listing',{listingId:item.id})}>Edit</button>{item.status==='pendingApproval'&&<button className={`${primary} px-3 py-1.5 rounded text-xs font-bold`} disabled={busy} onClick={()=>guarded(()=>approveListing(item.id),'Older pending listing published.')}>Publish</button>}<button className="text-red-700 hover:bg-red-50 px-2 rounded" aria-label={`Delete ${item.title}`} title="Delete product" disabled={busy} onClick={()=>{if(window.confirm(`Delete ${item.title}?`))guarded(()=>deleteListing(item.id),'Product deleted.');}}><Trash2 className="w-4 h-4"/></button></div>
+      </article>;})}
+      </div>)}
     </section>}
     {activeTab==='categories'&&<section className="bg-white border border-slate-200 rounded p-5 space-y-4"><h2 className="text-base font-extrabold">Product Categories</h2><form onSubmit={e=>{e.preventDefault();if(newCategory.trim())guarded(()=>addCategory(newCategory.trim()),'Category saved.').then(()=>setNewCategory(''));}} className="flex gap-2"><input value={newCategory} onChange={e=>setNewCategory(e.target.value)} required className="min-w-0 flex-1 border rounded p-2 text-sm" placeholder="Category name"/><button className={`${primary} rounded px-3 text-xs font-bold`} disabled={busy}>Add</button></form>
       {categories.map(c=><div key={c.id} className="border-b border-slate-100 py-2 flex items-center justify-between text-sm">{c.name}<button className="text-red-700" onClick={()=>{if(window.confirm(`Delete ${c.name}?`))guarded(()=>deleteCategory(c.id),'Category removed.');}}><Trash2 className="w-4 h-4"/></button></div>)}
@@ -117,21 +135,36 @@ export const TeacherAdminDashboardView:React.FC=()=>{
         <div className="space-y-2">
           <h2 className="text-base font-extrabold">Admin Accounts</h2>
           <p className="text-sm text-slate-600">
-            Invite an administrator by email. They will receive a link, register with their own password (or sign in to an existing account), and select <strong>Activate Admin Access</strong>. Their account stays a Buyer until they accept.
+            Enter someone's email to make them an administrator. <strong>If they already have an account on this site, they become an admin right away.</strong> If not, you get an invitation link to send them (by text, chat or email); they create an account with that email and select <strong>Activate Admin Access</strong>. This works whether or not automatic email is set up.
           </p>
         </div>
         <form className="flex flex-wrap gap-2" onSubmit={e => {
           e.preventDefault();
-          run(() => addAdminEmail(adminEmail), `Invitation email sent to ${adminEmail.trim().toLowerCase()}. Access activates after they accept.`)
+          const email = adminEmail.trim().toLowerCase();
+          setInviteLink(null); setLinkCopied(false);
+          run(() => addAdminEmail(email), result => {
+            if (result.inviteUrl) setInviteLink({ email, url: result.inviteUrl });
+            return result.message;
+          })
             .then(() => setAdminEmail(''))
             .catch(() => {});
         }}>
           <input type="email" required value={adminEmail} onChange={e=>setAdminEmail(e.target.value)} className="min-w-[200px] flex-1 border rounded p-2 text-sm" placeholder="Administrator email" aria-label="Administrator email" />
           <button disabled={busy} className={`${primary} rounded px-3 py-2 text-xs font-bold`}>
-            Send admin invitation
+            Add administrator
           </button>
         </form>
-        <p className="text-xs text-slate-500">Invitations expire after 72 hours. Invited people are not administrators until they accept the email invitation.</p>
+        {inviteLink && <div className="rounded border border-amber-300 bg-amber-50 p-3 space-y-2">
+          <p className="text-xs font-bold text-amber-900">Invitation link for {inviteLink.email} (works once, expires in 72 hours)</p>
+          <div className="flex flex-wrap gap-2">
+            <input readOnly value={inviteLink.url} onFocus={e=>e.target.select()} aria-label="Invitation link" className="min-w-[200px] flex-1 border border-amber-300 bg-white rounded p-2 text-xs font-mono"/>
+            <button type="button" className={`${primary} rounded px-3 py-2 text-xs font-bold`} onClick={() => {
+              navigator.clipboard?.writeText(inviteLink.url).then(() => setLinkCopied(true)).catch(() => setLinkCopied(false));
+            }}>{linkCopied ? 'Copied!' : 'Copy link'}</button>
+          </div>
+          <p className="text-[11px] text-amber-900">Only send this to {inviteLink.email}. It only works for an account signed in with that email.</p>
+        </div>}
+        <p className="text-xs text-slate-500">Invitation links expire after 72 hours. Invited people are not administrators until they open the link and accept.</p>
         {adminWhitelist.map(email => {
           const isOwner = email.toLowerCase() === BASELINE_ADMIN_WHITELIST[0].toLowerCase();
           const status = adminAccountRecords.find(record => record.email === email.toLowerCase())?.status;
